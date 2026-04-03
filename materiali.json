@@ -1,0 +1,74 @@
+{
+  "Plastica (mix)": {
+    "t_verg": 2.5,
+    "t_smalt": 1.0,
+    "t_tratt": 0.1,
+    "t_ric": 0.6,
+    "tipo": "abiotico",
+    "resa": null,
+    "f_equiv": null
+  },
+  "Carta/cartone": {
+    "t_verg": 1.15,
+    "t_smalt": 0.85,
+    "t_tratt": 0.1,
+    "t_ric": 0.45,
+    "tipo": "biologico",
+    "resa": 2.68,
+    "f_equiv": 1.26
+  },
+  "Vetro": {
+    "t_verg": 0.9,
+    "t_smalt": 0.15,
+    "t_tratt": 0.05,
+    "t_ric": 0.3,
+    "tipo": "abiotico",
+    "resa": null,
+    "f_equiv": null
+  },
+  "Metalli": {
+    "t_verg": 3.5,
+    "t_smalt": 0.2,
+    "t_tratt": 0.1,
+    "t_ric": 0.6,
+    "tipo": "abiotico",
+    "resa": null,
+    "f_equiv": null
+  },
+  "Legno": {
+    "t_verg": 0.35,
+    "t_smalt": 1.15,
+    "t_tratt": 0.1,
+    "t_ric": 0.2,
+    "tipo": "biologico",
+    "resa": 2.68,
+    "f_equiv": 1.26
+  },
+  "Toner": {
+    "t_verg": 4.0,
+    "t_smalt": 1.2,
+    "t_tratt": 0.1,
+    "t_ric": 1.5,
+    "tipo": "abiotico",
+    "resa": null,
+    "f_equiv": null
+  },
+  "Organico": {
+    "t_verg": null,
+    "t_smalt": 1.5,
+    "t_tratt": 0.1,
+    "t_ric": 0.2,
+    "tipo": "biologico",
+    "resa": 3.3,
+    "f_equiv": 2.51
+  },
+  "Indifferenziato": {
+    "t_verg": null,
+    "t_smalt": 1.1,
+    "t_tratt": 0.1,
+    "t_ric": 0.0,
+    "tipo": "abiotico",
+    "resa": null,
+    "f_equiv": null
+  }
+}

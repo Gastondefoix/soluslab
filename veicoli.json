@@ -1,0 +1,14 @@
+[
+  {
+    "modello": "Fiat Ducato 35 L3H2",
+    "co2pkm_vuoto": 0.18,
+    "co2pkm_pieno": 0.3,
+    "c_max": 1200
+  },
+  {
+    "modello": "Iveco Daily 35S",
+    "co2pkm_vuoto": 0.21,
+    "co2pkm_pieno": 0.37,
+    "c_max": 1500
+  }
+]

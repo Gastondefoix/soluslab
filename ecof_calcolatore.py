@@ -5,10 +5,31 @@ Avvio: streamlit run ecof_calcolatore.py
 Dipendenze: pip install streamlit pandas plotly
 """
 
+import json
 import math
+import os
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PERSISTENZA JSON
+# ──────────────────────────────────────────────────────────────────────────────
+
+def load_json(filename, default):
+    """Legge filename se esiste e restituisce il contenuto; altrimenti restituisce default."""
+    try:
+        with open(filename, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return default
+
+
+def save_json(filename, data):
+    """Scrive data su filename in formato JSON leggibile."""
+    with open(filename, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, ensure_ascii=False, indent=2)
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # FATTORI EMISSIVI (fonte: Cartel1.xlsx fornito da Ecof Italia)
@@ -44,6 +65,10 @@ FATTORI = {
         "t_verg": None, "t_smalt": 1.50, "t_tratt": 0.10, "t_ric": 0.20,
         "tipo": "biologico", "resa": 3.30, "f_equiv": 2.51,
     },
+    "Indifferenziato": {
+        "t_verg": None, "t_smalt": 1.10, "t_tratt": 0.10, "t_ric": 0.0,
+        "tipo": "abiotico", "resa": None, "f_equiv": None,
+    },
 }
 
 # Capacità assorbimento CO₂ foreste (GFN): 0.95 tCO₂/ha/anno × 1.26 = 1.197 tCO₂/gha/anno
@@ -52,8 +77,8 @@ CO2_PER_GHA = 1.197
 # Veicoli di default — verranno sovrascritti dai dati in session_state
 # co2pkm_pieno = None significa dato non ancora rilevato → fallback lineare
 VEICOLI_DEFAULT = [
-    {"modello": "Fiat Ducato 35 L3H2", "co2pkm_vuoto": 0.18, "co2pkm_pieno": None, "c_max": 1200},
-    {"modello": "Iveco Daily 35S",      "co2pkm_vuoto": 0.21, "co2pkm_pieno": None, "c_max": 1500},
+    {"modello": "Fiat Ducato 35 L3H2", "co2pkm_vuoto": 0.18, "co2pkm_pieno": 0.30, "c_max": 1200},
+    {"modello": "Iveco Daily 35S",      "co2pkm_vuoto": 0.21, "co2pkm_pieno": 0.37, "c_max": 1500},
 ]
 
 
@@ -98,7 +123,7 @@ def calcola_movimento(materiale, q_kg, d_ecof_km, d_impianto_km, n_giro, carico_
     gha_netti = -gha_impronta + bc_liberata
     Convenzione: positivo = biocapacita, negativo = impronta ecologica
     """
-    f = FATTORI[materiale]
+    f = st.session_state.get("materiali", FATTORI)[materiale]
     conf         = q_kg / carico_totale_kg
     co2pkm_vuoto = co2_per_km(0, veicolo)
     co2pkm_car   = co2_per_km(carico_totale_kg, veicolo)
@@ -199,6 +224,7 @@ def sezione_veicoli():
                 "co2pkm_pieno": pieno,
                 "c_max": nuovo_cmax,
             })
+            save_json("veicoli.json", st.session_state.veicoli)
             st.success(f"Veicolo '{nuovo_modello}' aggiunto.")
             st.rerun()
 
@@ -213,7 +239,287 @@ def sezione_veicoli():
                 st.session_state.veicoli = [
                     v for v in st.session_state.veicoli if v["modello"] != da_rimuovere
                 ]
+                save_json("veicoli.json", st.session_state.veicoli)
                 st.rerun()
+
+    if st.session_state.veicoli:
+        st.markdown("**Modifica veicolo esistente**")
+
+        modelli_mod = [v["modello"] for v in st.session_state.veicoli]
+
+        # Reset dei campi di editing quando cambia il veicolo selezionato
+        if "ultimo_veicolo_modifica" not in st.session_state:
+            st.session_state.ultimo_veicolo_modifica = modelli_mod[0]
+
+        sel_mod = st.selectbox("Seleziona veicolo da modificare", modelli_mod, key="sel_modifica")
+
+        if sel_mod != st.session_state.ultimo_veicolo_modifica:
+            for k in ("edit_modello", "edit_vuoto", "edit_pieno", "edit_cmax"):
+                st.session_state.pop(k, None)
+            st.session_state.ultimo_veicolo_modifica = sel_mod
+
+        v_mod = next(v for v in st.session_state.veicoli if v["modello"] == sel_mod)
+        pieno_default = str(v_mod["co2pkm_pieno"]) if v_mod["co2pkm_pieno"] is not None else ""
+
+        ec1, ec2, ec3, ec4 = st.columns([2, 1, 1, 1])
+        with ec1:
+            edit_modello = st.text_input("Nome modello", value=v_mod["modello"], key="edit_modello")
+        with ec2:
+            edit_vuoto = st.number_input("CO2/km vuoto", min_value=0.05, value=v_mod["co2pkm_vuoto"], step=0.01, key="edit_vuoto")
+        with ec3:
+            edit_pieno_str = st.text_input("CO2/km pieno (opz.)", value=pieno_default, key="edit_pieno")
+        with ec4:
+            edit_cmax = st.number_input("C_max (kg)", min_value=100, value=v_mod["c_max"], step=100, key="edit_cmax")
+
+        if st.button("Salva modifiche"):
+            if not edit_modello.strip():
+                st.warning("Il nome del modello non può essere vuoto.")
+            else:
+                altri_modelli = [v["modello"] for v in st.session_state.veicoli if v["modello"] != sel_mod]
+                if edit_modello.strip() in altri_modelli:
+                    st.warning(f"Esiste già un veicolo con il nome '{edit_modello.strip()}'.")
+                else:
+                    try:
+                        pieno = float(edit_pieno_str) if edit_pieno_str.strip() else None
+                    except ValueError:
+                        pieno = None
+                        st.warning("CO2/km pieno non valido — verra usato il fallback lineare.")
+                    idx = next(i for i, v in enumerate(st.session_state.veicoli) if v["modello"] == sel_mod)
+                    st.session_state.veicoli[idx] = {
+                        "modello": edit_modello.strip(),
+                        "co2pkm_vuoto": edit_vuoto,
+                        "co2pkm_pieno": pieno,
+                        "c_max": edit_cmax,
+                    }
+                    save_json("veicoli.json", st.session_state.veicoli)
+                    st.session_state.ultimo_veicolo_modifica = edit_modello.strip()
+                    st.success(f"Veicolo '{edit_modello.strip()}' aggiornato.")
+                    st.rerun()
+
+
+def sezione_materiali():
+    st.markdown("### Gestione Materiali")
+    st.caption(
+        "Modifica i fattori emissivi usati nel calcolo. "
+        "T_verg, resa e f_equiv possono essere lasciati vuoti (n.d.)."
+    )
+
+    # ── Tabella ───────────────────────────────────────────────────────────────
+    if st.session_state.materiali:
+        rows = []
+        for nome, f in st.session_state.materiali.items():
+            rows.append({
+                "Materiale": nome,
+                "Tipo":      f["tipo"],
+                "T_verg":    f["t_verg"] if f["t_verg"] is not None else "n.d.",
+                "T_smalt":   f["t_smalt"],
+                "T_tratt":   f["t_tratt"],
+                "T_ric":     f["t_ric"],
+                "Resa (t/ha)": f["resa"] if f["resa"] is not None else "—",
+                "F_equiv":   f["f_equiv"] if f["f_equiv"] is not None else "—",
+            })
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
+    else:
+        st.info("Nessun materiale inserito.")
+
+    # ── Aggiungi ──────────────────────────────────────────────────────────────
+    st.markdown("**Aggiungi materiale**")
+    a1, a2 = st.columns([2, 1])
+    with a1:
+        nuovo_nome = st.text_input("Nome materiale", key="mat_input_nome", placeholder="es. Gomma")
+    with a2:
+        nuovo_tipo = st.selectbox("Tipo", ["abiotico", "biologico"], key="mat_input_tipo")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        nuovo_tverg_str = st.text_input(
+            "Produzione vergine (kgCO₂/kg)", key="mat_input_tverg", placeholder="es. 2.50",
+            help="CO₂ emessa per produrre 1kg di materia vergine",
+        )
+    with c2:
+        nuovo_tsmalt = st.number_input(
+            "Smaltimento (kgCO₂/kg)", min_value=0.0, value=1.0, step=0.01, key="mat_input_tsmalt",
+            help="CO₂ emessa per smaltire 1kg senza riciclo",
+        )
+    with c3:
+        nuovo_ttratt = st.number_input(
+            "Trattamento (kgCO₂/kg)", min_value=0.0, value=0.10, step=0.01, key="mat_input_ttratt",
+            help="CO₂ emessa per il trattamento pre-riciclo di 1kg",
+        )
+    with c4:
+        nuovo_tric = st.number_input(
+            "Riciclo (kgCO₂/kg)", min_value=0.0, value=0.60, step=0.01, key="mat_input_tric",
+            help="CO₂ emessa dal processo di riciclo di 1kg",
+        )
+    if nuovo_tipo == "biologico":
+        d1, d2 = st.columns(2)
+        with d1:
+            nuovo_resa_str = st.text_input(
+                "Resa coltura (t/ha/anno)", key="mat_input_resa", placeholder="es. 2.68",
+                help="Tonnellate di biomassa prodotte per ettaro all'anno — fonte GFN",
+            )
+        with d2:
+            nuovo_fequiv_str = st.text_input(
+                "Equivalenza territoriale (gha/ha)", key="mat_input_fequiv", placeholder="es. 1.26",
+                help="Conversione da ettari fisici a ettari globali — fonte GFN",
+            )
+    else:
+        nuovo_resa_str = ""
+        nuovo_fequiv_str = ""
+
+    if st.button("Aggiungi materiale"):
+        if not nuovo_nome.strip():
+            st.warning("Inserisci il nome del materiale.")
+        elif nuovo_nome.strip() in st.session_state.materiali:
+            st.warning(f"Esiste già un materiale con il nome '{nuovo_nome.strip()}'.")
+        else:
+            try:
+                tverg = float(nuovo_tverg_str) if nuovo_tverg_str.strip() else None
+            except ValueError:
+                tverg = None
+                st.warning("T_verg non valido — impostato a n.d.")
+            if nuovo_tipo == "biologico":
+                try:
+                    resa = float(nuovo_resa_str) if nuovo_resa_str.strip() else None
+                except ValueError:
+                    resa = None
+                    st.warning("Resa non valida — impostata a n.d.")
+                try:
+                    fequiv = float(nuovo_fequiv_str) if nuovo_fequiv_str.strip() else None
+                except ValueError:
+                    fequiv = None
+                    st.warning("F_equiv non valido — impostato a n.d.")
+            else:
+                resa = None
+                fequiv = None
+            st.session_state.materiali[nuovo_nome.strip()] = {
+                "t_verg": tverg, "t_smalt": nuovo_tsmalt, "t_tratt": nuovo_ttratt,
+                "t_ric": nuovo_tric, "tipo": nuovo_tipo, "resa": resa, "f_equiv": fequiv,
+            }
+            save_json("materiali.json", st.session_state.materiali)
+            st.success(f"Materiale '{nuovo_nome.strip()}' aggiunto.")
+            st.rerun()
+
+    # ── Rimuovi ───────────────────────────────────────────────────────────────
+    if st.session_state.materiali:
+        nomi = list(st.session_state.materiali.keys())
+        col_del1, col_del2 = st.columns([2, 1])
+        with col_del1:
+            da_rimuovere = st.selectbox("Rimuovi materiale", nomi, key="mat_sel_rimuovi")
+        with col_del2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("Rimuovi", key="mat_btn_rimuovi"):
+                del st.session_state.materiali[da_rimuovere]
+                save_json("materiali.json", st.session_state.materiali)
+                st.rerun()
+
+    # ── Modifica ──────────────────────────────────────────────────────────────
+    if st.session_state.materiali:
+        st.markdown("**Modifica materiale esistente**")
+        nomi_mod = list(st.session_state.materiali.keys())
+
+        if "ultimo_mat_modifica" not in st.session_state:
+            st.session_state.ultimo_mat_modifica = nomi_mod[0]
+
+        sel_mat = st.selectbox("Seleziona materiale da modificare", nomi_mod, key="mat_sel_modifica")
+
+        if sel_mat != st.session_state.ultimo_mat_modifica:
+            for k in ("mat_edit_nome", "mat_edit_tipo", "mat_edit_tverg", "mat_edit_tsmalt",
+                      "mat_edit_ttratt", "mat_edit_tric", "mat_edit_resa", "mat_edit_fequiv"):
+                st.session_state.pop(k, None)
+            st.session_state.ultimo_mat_modifica = sel_mat
+
+        m = st.session_state.materiali[sel_mat]
+        tipo_opts = ["abiotico", "biologico"]
+        tipo_idx  = tipo_opts.index(m["tipo"]) if m["tipo"] in tipo_opts else 0
+        tverg_default  = str(m["t_verg"])  if m["t_verg"]  is not None else ""
+        resa_default   = str(m["resa"])    if m["resa"]    is not None else ""
+        fequiv_default = str(m["f_equiv"]) if m["f_equiv"] is not None else ""
+
+        ea1, ea2 = st.columns([2, 1])
+        with ea1:
+            edit_nome = st.text_input("Nome materiale", value=sel_mat, key="mat_edit_nome")
+        with ea2:
+            edit_tipo = st.selectbox("Tipo", tipo_opts, index=tipo_idx, key="mat_edit_tipo")
+        ec1, ec2, ec3, ec4 = st.columns(4)
+        with ec1:
+            edit_tverg_str = st.text_input(
+                "Produzione vergine (kgCO₂/kg)", value=tverg_default, key="mat_edit_tverg",
+                help="CO₂ emessa per produrre 1kg di materia vergine",
+            )
+        with ec2:
+            edit_tsmalt = st.number_input(
+                "Smaltimento (kgCO₂/kg)", min_value=0.0, value=float(m["t_smalt"]), step=0.01,
+                key="mat_edit_tsmalt", help="CO₂ emessa per smaltire 1kg senza riciclo",
+            )
+        with ec3:
+            edit_ttratt = st.number_input(
+                "Trattamento (kgCO₂/kg)", min_value=0.0, value=float(m["t_tratt"]), step=0.01,
+                key="mat_edit_ttratt", help="CO₂ emessa per il trattamento pre-riciclo di 1kg",
+            )
+        with ec4:
+            edit_tric = st.number_input(
+                "Riciclo (kgCO₂/kg)", min_value=0.0, value=float(m["t_ric"]), step=0.01,
+                key="mat_edit_tric", help="CO₂ emessa dal processo di riciclo di 1kg",
+            )
+        if edit_tipo == "biologico":
+            ed1, ed2 = st.columns(2)
+            with ed1:
+                edit_resa_str = st.text_input(
+                    "Resa coltura (t/ha/anno)", value=resa_default, key="mat_edit_resa",
+                    help="Tonnellate di biomassa prodotte per ettaro all'anno — fonte GFN",
+                )
+            with ed2:
+                edit_fequiv_str = st.text_input(
+                    "Equivalenza territoriale (gha/ha)", value=fequiv_default, key="mat_edit_fequiv",
+                    help="Conversione da ettari fisici a ettari globali — fonte GFN",
+                )
+        else:
+            edit_resa_str = ""
+            edit_fequiv_str = ""
+
+        if st.button("Salva modifiche", key="mat_btn_salva"):
+            if not edit_nome.strip():
+                st.warning("Il nome del materiale non può essere vuoto.")
+            else:
+                altri_nomi = [n for n in st.session_state.materiali if n != sel_mat]
+                if edit_nome.strip() in altri_nomi:
+                    st.warning(f"Esiste già un materiale con il nome '{edit_nome.strip()}'.")
+                else:
+                    try:
+                        tverg = float(edit_tverg_str) if edit_tverg_str.strip() else None
+                    except ValueError:
+                        tverg = None
+                        st.warning("T_verg non valido — impostato a n.d.")
+                    if edit_tipo == "biologico":
+                        try:
+                            resa = float(edit_resa_str) if edit_resa_str.strip() else None
+                        except ValueError:
+                            resa = None
+                            st.warning("Resa non valida — impostata a n.d.")
+                        try:
+                            fequiv = float(edit_fequiv_str) if edit_fequiv_str.strip() else None
+                        except ValueError:
+                            fequiv = None
+                            st.warning("F_equiv non valido — impostato a n.d.")
+                    else:
+                        resa = None
+                        fequiv = None
+                    nuovo_mat = {
+                        "t_verg": tverg, "t_smalt": edit_tsmalt, "t_tratt": edit_ttratt,
+                        "t_ric": edit_tric, "tipo": edit_tipo, "resa": resa, "f_equiv": fequiv,
+                    }
+                    if edit_nome.strip() != sel_mat:
+                        # Rename: rebuild dict to preserve insertion order
+                        st.session_state.materiali = {
+                            (edit_nome.strip() if k == sel_mat else k): (nuovo_mat if k == sel_mat else v)
+                            for k, v in st.session_state.materiali.items()
+                        }
+                    else:
+                        st.session_state.materiali[sel_mat] = nuovo_mat
+                    save_json("materiali.json", st.session_state.materiali)
+                    st.session_state.ultimo_mat_modifica = edit_nome.strip()
+                    st.success(f"Materiale '{edit_nome.strip()}' aggiornato.")
+                    st.rerun()
 
 
 def pagina_calcolatore():
@@ -240,8 +546,8 @@ def pagina_calcolatore():
 
         st.divider()
 
-        materiale = st.selectbox("Materiale", list(FATTORI.keys()))
-        f = FATTORI[materiale]
+        materiale = st.selectbox("Materiale", list(st.session_state["materiali"].keys()))
+        f = st.session_state["materiali"][materiale]
 
         q_kg = st.number_input(
             "Q — Kg conferiti dal cliente",
@@ -469,14 +775,19 @@ def main():
     )
 
     if "veicoli" not in st.session_state:
-        st.session_state.veicoli = VEICOLI_DEFAULT.copy()
+        st.session_state.veicoli = load_json("veicoli.json", VEICOLI_DEFAULT.copy())
+
+    if "materiali" not in st.session_state:
+        st.session_state.materiali = load_json(
+            "materiali.json", {k: dict(v) for k, v in FATTORI.items()}
+        )
 
     st.markdown("# Calcolatore Saldo Ambientale")
     st.caption("Ecof Italia — strumento interno di calcolo CO2 e biocapacita per movimento rifiuti.")
     st.divider()
 
     sezione = st.radio(
-        "Sezione", ["Calcolatore", "Veicoli", "Tabelle"],
+        "Sezione", ["Calcolatore", "Veicoli", "Materiali", "Tabelle"],
         horizontal=True, label_visibility="collapsed",
     )
     st.markdown("---")
@@ -485,6 +796,8 @@ def main():
         pagina_calcolatore()
     elif sezione == "Veicoli":
         sezione_veicoli()
+    elif sezione == "Materiali":
+        sezione_materiali()
     elif sezione == "Tabelle":
         pagina_tabelle()
 
