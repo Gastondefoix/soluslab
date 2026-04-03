@@ -139,7 +139,7 @@ def badge_saldo(gha):
             f'padding:1rem 1.5rem;text-align:center;display:inline-block">'
             f'<div style="color:#52FFB8;font-size:.7rem;font-weight:700;letter-spacing:.1em">'
             f'BIOCAPACITA LIBERATA</div>'
-            f'<div style="color:#52FFB8;font-size:2rem;font-weight:800">+{gha:.5f} gha</div></div>'
+            f'<div style="color:#52FFB8;font-size:2rem;font-weight:800">+{gha:.4f} gha</div></div>'
         )
     else:
         return (
@@ -147,7 +147,7 @@ def badge_saldo(gha):
             f'padding:1rem 1.5rem;text-align:center;display:inline-block">'
             f'<div style="color:#FF4B4B;font-size:.7rem;font-weight:700;letter-spacing:.1em">'
             f'IMPRONTA ECOLOGICA</div>'
-            f'<div style="color:#FF4B4B;font-size:2rem;font-weight:800">{gha:.5f} gha</div></div>'
+            f'<div style="color:#FF4B4B;font-size:2rem;font-weight:800">{gha:.4f} gha</div></div>'
         )
 
 
@@ -297,10 +297,23 @@ def pagina_calcolatore():
         else:
             st.success("Curva logaritmica applicata.")
 
-        m1, m2, m3 = st.columns(3)
-        m1.metric("CO2 netta totale",  f"{r['co2_netta']:+.2f} kg")
-        m2.metric("Impronta in gha",   f"{r['gha_impronta']:.5f}")
-        m3.metric("Biocapacità liberata (gha)", f"{r['bc_liberata']:.5f}")
+        # Biocapacità da CO₂ evitata — mostrata solo quando co2_netta < 0
+        bc_co2 = abs(r["gha_impronta"]) if r["co2_netta"] < 0 else None
+
+        if bc_co2 is not None:
+            # Riciclo virtuoso: due righe da 2 metriche ciascuna
+            m1, m2 = st.columns(2)
+            m1.metric("CO₂ netta",                  f"{r['co2_netta']:+.2f} kg")
+            m2.metric("Saldo netto",                 f"{r['gha_netti']:+.4f} gha")
+            m3, m4 = st.columns(2)
+            m3.metric("Biocapacità da CO₂ evitata", f"+{bc_co2:.4f} gha")
+            m4.metric("Biocapacità da terreno",      f"+{r['bc_liberata']:.4f} gha" if r["bc_liberata"] > 0 else "—")
+        else:
+            # Riciclo non virtuoso: CO₂ netta positiva → impronta, nessuna biocapacità da CO₂
+            m1, m2, m3 = st.columns(3)
+            m1.metric("CO₂ netta",             f"{r['co2_netta']:+.2f} kg")
+            m2.metric("Impronta ecologica",    f"{r['gha_impronta']:.4f} gha")
+            m3.metric("Biocapacità da terreno", f"+{r['bc_liberata']:.4f} gha" if r["bc_liberata"] > 0 else "—")
 
         st.divider()
 
@@ -396,15 +409,17 @@ def pagina_calcolatore():
 **Impronta in gha** = ({r['co2_netta']:.3f} / 1000) / {CO2_PER_GHA} = **{r['gha_impronta']:.5f} gha**
 """)
             if f["tipo"] == "biologico" and f["resa"]:
+                bc_co2_str = f"\n**Biocapacità da CO₂ evitata** = |{r['gha_impronta']:.5f}| = **{abs(r['gha_impronta']):.5f} gha**\n" if r["co2_netta"] < 0 else "\n*(CO₂ netta positiva — nessuna biocapacità da CO₂ evitata)*\n"
                 st.markdown(f"""
-**BC liberata** = ({q_kg} / 1000) / {f['resa']} x {f['f_equiv']} = **{r['bc_liberata']:.5f} gha**
-
+**Biocapacità da terreno** = ({q_kg} / 1000) / {f['resa']} x {f['f_equiv']} = **{r['bc_liberata']:.5f} gha**
+{bc_co2_str}
 **Saldo netto** = -{r['gha_impronta']:.5f} + {r['bc_liberata']:.5f} = **{r['gha_netti']:+.5f} gha**
 """)
             else:
+                bc_co2_str = f"\n**Biocapacità da CO₂ evitata** = |{r['gha_impronta']:.5f}| = **{abs(r['gha_impronta']):.5f} gha**\n" if r["co2_netta"] < 0 else "\n*(CO₂ netta positiva — nessuna biocapacità da CO₂ evitata)*\n"
                 st.markdown(f"""
-*(Materiale abiotico — nessuna biocapacita liberata)*
-
+*(Materiale abiotico — nessuna biocapacità da terreno)*
+{bc_co2_str}
 **Saldo netto** = -{r['gha_impronta']:.5f} = **{r['gha_netti']:+.5f} gha**
 """)
 
