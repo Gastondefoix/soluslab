@@ -1,8 +1,8 @@
 """
-ECOF ITALIA — Calcolatore Saldo Ambientale
+Soluslab — Environmental Balance Calculator
 ==========================================
-Avvio: streamlit run ecof_calcolatore.py
-Dipendenze: pip install streamlit pandas plotly
+Run: streamlit run app.py
+Dependencies: pip install streamlit pandas plotly
 """
 
 import json
@@ -13,11 +13,11 @@ import pandas as pd
 import plotly.graph_objects as go
 
 # ──────────────────────────────────────────────────────────────────────────────
-# PERSISTENZA JSON
+# JSON PERSISTENCE
 # ──────────────────────────────────────────────────────────────────────────────
 
 def load_json(filename, default):
-    """Legge filename se esiste e restituisce il contenuto; altrimenti restituisce default."""
+    """Reads filename if it exists and returns the content; otherwise returns default."""
     try:
         with open(filename, "r", encoding="utf-8") as fh:
             return json.load(fh)
@@ -26,14 +26,14 @@ def load_json(filename, default):
 
 
 def save_json(filename, data):
-    """Scrive data su filename in formato JSON leggibile."""
+    """Writes data to filename in readable JSON format."""
     with open(filename, "w", encoding="utf-8") as fh:
         json.dump(data, fh, ensure_ascii=False, indent=2)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# FATTORI EMISSIVI (fonte: Cartel1.xlsx fornito da Ecof Italia)
-# Unità: kgCO₂eq per kg di materiale
+# EMISSION FACTORS (source: internal data)
+# Unit: kgCO₂eq per kg of material
 # ──────────────────────────────────────────────────────────────────────────────
 FATTORI = {
     "Plastica (mix)": {
@@ -61,7 +61,7 @@ FATTORI = {
         "tipo": "abiotico", "resa": None, "f_equiv": None,
     },
     "Organico": {
-        # t_verg = n.d.: digestione aerobica a Recall Latina, output non definibile
+        # t_verg = n.d.: aerobic digestion at Recall Latina, output undefined
         "t_verg": None, "t_smalt": 1.50, "t_tratt": 0.10, "t_ric": 0.20,
         "tipo": "biologico", "resa": 3.30, "f_equiv": 2.51,
     },
@@ -71,11 +71,11 @@ FATTORI = {
     },
 }
 
-# Capacità assorbimento CO₂ foreste (GFN): 0.95 tCO₂/ha/anno × 1.26 = 1.197 tCO₂/gha/anno
+# Forest CO₂ absorption capacity (GFN): 0.95 tCO₂/ha/year × 1.26 = 1.197 tCO₂/gha/year
 CO2_PER_GHA = 1.197
 
-# Veicoli di default — verranno sovrascritti dai dati in session_state
-# co2pkm_pieno = None significa dato non ancora rilevato → fallback lineare
+# Default vehicles — will be overridden by session_state data
+# co2pkm_pieno = None means data not yet measured → linear fallback
 VEICOLI_DEFAULT = [
     {"modello": "Fiat Ducato 35 L3H2", "co2pkm_vuoto": 0.18, "co2pkm_pieno": 0.30, "c_max": 1200},
     {"modello": "Iveco Daily 35S",      "co2pkm_vuoto": 0.21, "co2pkm_pieno": 0.37, "c_max": 1500},
@@ -83,13 +83,13 @@ VEICOLI_DEFAULT = [
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# FUNZIONI DI CALCOLO
+# CALCULATION FUNCTIONS
 # ──────────────────────────────────────────────────────────────────────────────
 
 def co2_per_km_log(carico, co2_vuoto, co2_pieno, c_max):
     """
-    Modello logaritmico: CO2/km in funzione del carico.
-    Calibrato su due punti: f(0) = co2_vuoto, f(c_max) = co2_pieno.
+    Logarithmic model: CO2/km as a function of load.
+    Calibrated on two points: f(0) = co2_vuoto, f(c_max) = co2_pieno.
     b = (co2_pieno - co2_vuoto) / ln(1 + c_max)
     CO2perKm(C) = co2_vuoto + b * ln(1 + C)
     """
@@ -99,29 +99,29 @@ def co2_per_km_log(carico, co2_vuoto, co2_pieno, c_max):
 
 def co2_per_km_lin(carico, co2_vuoto):
     """
-    Fallback lineare EEA.
-    Rimosso non appena tutti i modelli hanno co2pkm_pieno rilevato.
+    EEA linear fallback.
+    Removed once all models have a measured co2pkm_pieno.
     """
     return co2_vuoto + carico * 0.00008
 
 
 def co2_per_km(carico, veicolo):
-    """Router: logaritmico se co2pkm_pieno disponibile, altrimenti lineare."""
+    """Router: logarithmic if co2pkm_pieno is available, otherwise linear."""
     if veicolo["co2pkm_pieno"] is not None:
         return co2_per_km_log(carico, veicolo["co2pkm_vuoto"], veicolo["co2pkm_pieno"], veicolo["c_max"])
     return co2_per_km_lin(carico, veicolo["co2pkm_vuoto"])
 
 
-def calcola_movimento(materiale, q_kg, d_ecof_km, d_impianto_km, n_giro, carico_totale_kg, veicolo):
+def calcola_movimento(materiale, q_kg, d_operator_km, d_impianto_km, n_giro, carico_totale_kg, veicolo):
     """
-    Calcola CO2 netta e saldo in gha per un singolo movimento.
+    Calculates net CO2 and balance in gha for a single movement.
 
     P1 = Q * (T_tratt + T_ric - T_smalt - T_verg)
     P2 = (D_cliente * CO2perKm(0)) / N_giro
     P3 = (CO2perKm(0) / N_giro) * D_impianto + (CO2perKm(C) - CO2perKm(0)) * D_impianto * Conf
 
     gha_netti = -gha_impronta + bc_liberata
-    Convenzione: positivo = biocapacita, negativo = impronta ecologica
+    Convention: positive = biocapacity, negative = ecological footprint
     """
     f = st.session_state.get("materiali", FATTORI)[materiale]
     conf         = q_kg / carico_totale_kg
@@ -134,7 +134,7 @@ def calcola_movimento(materiale, q_kg, d_ecof_km, d_impianto_km, n_giro, carico_
         p1 = q_kg * (f["t_tratt"] + f["t_smalt"])
     else:
         p1 = q_kg * (f["t_tratt"] + f["t_ric"] - f["t_smalt"] - t_verg)
-    p2 = (d_ecof_km * co2pkm_vuoto) / n_giro
+    p2 = (d_operator_km * co2pkm_vuoto) / n_giro
     p3 = (d_impianto_km * co2pkm_vuoto) / n_giro + (co2pkm_car - co2pkm_vuoto) * d_impianto_km * conf
 
     co2_netta = p1 + p2 + p3
@@ -150,7 +150,7 @@ def calcola_movimento(materiale, q_kg, d_ecof_km, d_impianto_km, n_giro, carico_
         "gha_impronta": gha_imp,
         "bc_liberata": bc_lib,
         "gha_netti": -gha_imp + bc_lib,
-        "modello_curva": "logaritmico" if veicolo["co2pkm_pieno"] is not None else "lineare (fallback)",
+        "modello_curva": "logarithmic" if veicolo["co2pkm_pieno"] is not None else "linear (fallback)",
         "co2pkm_vuoto": co2pkm_vuoto,
         "co2pkm_carico": co2pkm_car,
         "conf": conf,
@@ -159,7 +159,7 @@ def calcola_movimento(materiale, q_kg, d_ecof_km, d_impianto_km, n_giro, carico_
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# UI — COMPONENTI
+# UI — COMPONENTS
 # ──────────────────────────────────────────────────────────────────────────────
 
 def badge_saldo(gha):
@@ -168,7 +168,7 @@ def badge_saldo(gha):
             f'<div style="background:#0a2e1f;border:2px solid #52FFB8;border-radius:10px;'
             f'padding:1rem 1.5rem;text-align:center;display:inline-block">'
             f'<div style="color:#52FFB8;font-size:.7rem;font-weight:700;letter-spacing:.1em">'
-            f'BIOCAPACITA LIBERATA</div>'
+            f'BIOCAPACITY RELEASED</div>'
             f'<div style="color:#52FFB8;font-size:2rem;font-weight:800">+{gha:.4f} gha</div></div>'
         )
     else:
@@ -176,17 +176,17 @@ def badge_saldo(gha):
             f'<div style="background:#2e0a0a;border:2px solid #FF4B4B;border-radius:10px;'
             f'padding:1rem 1.5rem;text-align:center;display:inline-block">'
             f'<div style="color:#FF4B4B;font-size:.7rem;font-weight:700;letter-spacing:.1em">'
-            f'IMPRONTA ECOLOGICA</div>'
+            f'ECOLOGICAL FOOTPRINT</div>'
             f'<div style="color:#FF4B4B;font-size:2rem;font-weight:800">{gha:.4f} gha</div></div>'
         )
 
 
 def sezione_veicoli():
-    st.markdown("### Gestione Veicoli")
+    st.markdown("### Vehicle Management")
     st.caption(
-        "Inserisci i modelli di furgone usati da Ecof. "
-        "CO2/km pieno puo essere lasciato vuoto finche non e disponibile il dato reale: "
-        "verra usato il modello lineare come fallback."
+        "Enter the van models used by the operator. "
+        "CO2/km full load can be left blank until the actual measurement is available: "
+        "the linear model will be used as fallback."
     )
 
     if "veicoli" not in st.session_state:
@@ -195,33 +195,33 @@ def sezione_veicoli():
     if st.session_state.veicoli:
         df_v = pd.DataFrame(st.session_state.veicoli)
         df_v["co2pkm_pieno"] = df_v["co2pkm_pieno"].apply(
-            lambda x: x if x is not None else "— (da rilevare)"
+            lambda x: x if x is not None else "— (to be measured)"
         )
-        df_v.columns = ["Modello", "CO2/km vuoto", "CO2/km pieno", "C_max (kg)"]
+        df_v.columns = ["Model", "CO2/km empty", "CO2/km full", "C_max (kg)"]
         st.dataframe(df_v, hide_index=True, width='stretch')
     else:
-        st.info("Nessun veicolo inserito.")
+        st.info("No vehicles entered.")
 
-    st.markdown("**Aggiungi veicolo**")
+    st.markdown("**Add vehicle**")
     c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
     with c1:
-        nuovo_modello = st.text_input("Nome modello", key="input_modello", placeholder="es. Fiat Ducato 35 L3H2")
+        nuovo_modello = st.text_input("Model name", key="input_modello", placeholder="e.g. Fiat Ducato 35 L3H2")
     with c2:
-        nuovo_vuoto = st.number_input("CO2/km vuoto", min_value=0.05, value=0.18, step=0.01, key="input_vuoto")
+        nuovo_vuoto = st.number_input("CO2/km empty", min_value=0.05, value=0.18, step=0.01, key="input_vuoto")
     with c3:
-        nuovo_pieno_str = st.text_input("CO2/km pieno (opz.)", key="input_pieno", placeholder="es. 0.24")
+        nuovo_pieno_str = st.text_input("CO2/km full (opt.)", key="input_pieno", placeholder="e.g. 0.24")
     with c4:
         nuovo_cmax = st.number_input("C_max (kg)", min_value=100, value=1200, step=100, key="input_cmax")
 
-    if st.button("Aggiungi veicolo"):
+    if st.button("Add vehicle"):
         if not nuovo_modello.strip():
-            st.warning("Inserisci il nome del modello.")
+            st.warning("Enter the model name.")
         else:
             try:
                 pieno = float(nuovo_pieno_str) if nuovo_pieno_str.strip() else None
             except ValueError:
                 pieno = None
-                st.warning("CO2/km pieno non valido — verra usato il fallback lineare.")
+                st.warning("Invalid CO2/km full load — linear fallback will be used.")
 
             st.session_state.veicoli.append({
                 "modello": nuovo_modello.strip(),
@@ -230,17 +230,17 @@ def sezione_veicoli():
                 "c_max": nuovo_cmax,
             })
             save_json("veicoli.json", st.session_state.veicoli)
-            st.success(f"Veicolo '{nuovo_modello}' aggiunto.")
+            st.success(f"Vehicle '{nuovo_modello}' added.")
             st.rerun()
 
     if st.session_state.veicoli:
         modelli_esistenti = [v["modello"] for v in st.session_state.veicoli]
         col_del1, col_del2 = st.columns([2, 1])
         with col_del1:
-            da_rimuovere = st.selectbox("Rimuovi veicolo", modelli_esistenti, key="sel_rimuovi")
+            da_rimuovere = st.selectbox("Remove vehicle", modelli_esistenti, key="sel_rimuovi")
         with col_del2:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("Rimuovi"):
+            if st.button("Remove"):
                 st.session_state.veicoli = [
                     v for v in st.session_state.veicoli if v["modello"] != da_rimuovere
                 ]
@@ -248,15 +248,15 @@ def sezione_veicoli():
                 st.rerun()
 
     if st.session_state.veicoli:
-        st.markdown("**Modifica veicolo esistente**")
+        st.markdown("**Edit existing vehicle**")
 
         modelli_mod = [v["modello"] for v in st.session_state.veicoli]
 
-        # Reset dei campi di editing quando cambia il veicolo selezionato
+        # Reset editing fields when the selected vehicle changes
         if "ultimo_veicolo_modifica" not in st.session_state:
             st.session_state.ultimo_veicolo_modifica = modelli_mod[0]
 
-        sel_mod = st.selectbox("Seleziona veicolo da modificare", modelli_mod, key="sel_modifica")
+        sel_mod = st.selectbox("Select vehicle to edit", modelli_mod, key="sel_modifica")
 
         if sel_mod != st.session_state.ultimo_veicolo_modifica:
             for k in ("edit_modello", "edit_vuoto", "edit_pieno", "edit_cmax"):
@@ -268,27 +268,27 @@ def sezione_veicoli():
 
         ec1, ec2, ec3, ec4 = st.columns([2, 1, 1, 1])
         with ec1:
-            edit_modello = st.text_input("Nome modello", value=v_mod["modello"], key="edit_modello")
+            edit_modello = st.text_input("Model name", value=v_mod["modello"], key="edit_modello")
         with ec2:
-            edit_vuoto = st.number_input("CO2/km vuoto", min_value=0.05, value=v_mod["co2pkm_vuoto"], step=0.01, key="edit_vuoto")
+            edit_vuoto = st.number_input("CO2/km empty", min_value=0.05, value=v_mod["co2pkm_vuoto"], step=0.01, key="edit_vuoto")
         with ec3:
-            edit_pieno_str = st.text_input("CO2/km pieno (opz.)", value=pieno_default, key="edit_pieno")
+            edit_pieno_str = st.text_input("CO2/km full (opt.)", value=pieno_default, key="edit_pieno")
         with ec4:
             edit_cmax = st.number_input("C_max (kg)", min_value=100, value=v_mod["c_max"], step=100, key="edit_cmax")
 
-        if st.button("Salva modifiche"):
+        if st.button("Save changes"):
             if not edit_modello.strip():
-                st.warning("Il nome del modello non può essere vuoto.")
+                st.warning("Model name cannot be empty.")
             else:
                 altri_modelli = [v["modello"] for v in st.session_state.veicoli if v["modello"] != sel_mod]
                 if edit_modello.strip() in altri_modelli:
-                    st.warning(f"Esiste già un veicolo con il nome '{edit_modello.strip()}'.")
+                    st.warning(f"A vehicle named '{edit_modello.strip()}' already exists.")
                 else:
                     try:
                         pieno = float(edit_pieno_str) if edit_pieno_str.strip() else None
                     except ValueError:
                         pieno = None
-                        st.warning("CO2/km pieno non valido — verra usato il fallback lineare.")
+                        st.warning("Invalid CO2/km full load — linear fallback will be used.")
                     idx = next(i for i, v in enumerate(st.session_state.veicoli) if v["modello"] == sel_mod)
                     st.session_state.veicoli[idx] = {
                         "modello": edit_modello.strip(),
@@ -298,101 +298,101 @@ def sezione_veicoli():
                     }
                     save_json("veicoli.json", st.session_state.veicoli)
                     st.session_state.ultimo_veicolo_modifica = edit_modello.strip()
-                    st.success(f"Veicolo '{edit_modello.strip()}' aggiornato.")
+                    st.success(f"Vehicle '{edit_modello.strip()}' updated.")
                     st.rerun()
 
 
 def sezione_materiali():
-    st.markdown("### Gestione Materiali")
+    st.markdown("### Material Management")
     st.caption(
-        "Modifica i fattori emissivi usati nel calcolo. "
-        "T_verg, resa e f_equiv possono essere lasciati vuoti (n.d.)."
+        "Edit the emission factors used in the calculation. "
+        "T_verg, resa and f_equiv can be left blank (n.d.)."
     )
 
-    # ── Tabella ───────────────────────────────────────────────────────────────
+    # ── Table ─────────────────────────────────────────────────────────────────
     if st.session_state.materiali:
         rows = []
         for nome, f in st.session_state.materiali.items():
             rows.append({
-                "Materiale": nome,
-                "Tipo":      f["tipo"],
-                "T_verg":    f["t_verg"] if f["t_verg"] is not None else "n.d.",
-                "T_smalt":   f["t_smalt"],
-                "T_tratt":   f["t_tratt"],
-                "T_ric":     f["t_ric"],
-                "Resa (t/ha)": f["resa"] if f["resa"] is not None else "—",
-                "F_equiv":   f["f_equiv"] if f["f_equiv"] is not None else "—",
+                "Material":    nome,
+                "Type":        f["tipo"],
+                "T_verg":      f["t_verg"] if f["t_verg"] is not None else "n.d.",
+                "T_smalt":     f["t_smalt"],
+                "T_tratt":     f["t_tratt"],
+                "T_ric":       f["t_ric"],
+                "Yield (t/ha)": f["resa"] if f["resa"] is not None else "—",
+                "F_equiv":     f["f_equiv"] if f["f_equiv"] is not None else "—",
             })
         st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
     else:
-        st.info("Nessun materiale inserito.")
+        st.info("No materials entered.")
 
-    # ── Aggiungi ──────────────────────────────────────────────────────────────
-    st.markdown("**Aggiungi materiale**")
+    # ── Add ───────────────────────────────────────────────────────────────────
+    st.markdown("**Add material**")
     a1, a2 = st.columns([2, 1])
     with a1:
-        nuovo_nome = st.text_input("Nome materiale", key="mat_input_nome", placeholder="es. Gomma")
+        nuovo_nome = st.text_input("Material name", key="mat_input_nome", placeholder="e.g. Rubber")
     with a2:
-        nuovo_tipo = st.selectbox("Tipo", ["abiotico", "biologico"], key="mat_input_tipo")
+        nuovo_tipo = st.selectbox("Type", ["abiotico", "biologico"], key="mat_input_tipo")
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         nuovo_tverg_str = st.text_input(
-            "Produzione vergine (kgCO₂/kg)", key="mat_input_tverg", placeholder="es. 2.50",
-            help="CO₂ emessa per produrre 1kg di materia vergine",
+            "Virgin production (kgCO₂/kg)", key="mat_input_tverg", placeholder="e.g. 2.50",
+            help="CO₂ emitted to produce 1kg of virgin material",
         )
     with c2:
         nuovo_tsmalt = st.number_input(
-            "Smaltimento (kgCO₂/kg)", min_value=0.0, value=1.0, step=0.01, key="mat_input_tsmalt",
-            help="CO₂ emessa per smaltire 1kg senza riciclo",
+            "Disposal (kgCO₂/kg)", min_value=0.0, value=1.0, step=0.01, key="mat_input_tsmalt",
+            help="CO₂ emitted to dispose of 1kg without recycling",
         )
     with c3:
         nuovo_ttratt = st.number_input(
-            "Trattamento (kgCO₂/kg)", min_value=0.0, value=0.10, step=0.01, key="mat_input_ttratt",
-            help="CO₂ emessa per il trattamento pre-riciclo di 1kg",
+            "Treatment (kgCO₂/kg)", min_value=0.0, value=0.10, step=0.01, key="mat_input_ttratt",
+            help="CO₂ emitted for pre-recycling treatment of 1kg",
         )
     with c4:
         nuovo_tric = st.number_input(
-            "Riciclo (kgCO₂/kg)", min_value=0.0, value=0.60, step=0.01, key="mat_input_tric",
-            help="CO₂ emessa dal processo di riciclo di 1kg",
+            "Recycling (kgCO₂/kg)", min_value=0.0, value=0.60, step=0.01, key="mat_input_tric",
+            help="CO₂ emitted by the recycling process for 1kg",
         )
     if nuovo_tipo == "biologico":
         d1, d2 = st.columns(2)
         with d1:
             nuovo_resa_str = st.text_input(
-                "Resa coltura (t/ha/anno)", key="mat_input_resa", placeholder="es. 2.68",
-                help="Tonnellate di biomassa prodotte per ettaro all'anno — fonte GFN",
+                "Crop yield (t/ha/year)", key="mat_input_resa", placeholder="e.g. 2.68",
+                help="Tonnes of biomass produced per hectare per year — source GFN",
             )
         with d2:
             nuovo_fequiv_str = st.text_input(
-                "Equivalenza territoriale (gha/ha)", key="mat_input_fequiv", placeholder="es. 1.26",
-                help="Conversione da ettari fisici a ettari globali — fonte GFN",
+                "Land equivalence (gha/ha)", key="mat_input_fequiv", placeholder="e.g. 1.26",
+                help="Conversion from physical hectares to global hectares — source GFN",
             )
     else:
         nuovo_resa_str = ""
         nuovo_fequiv_str = ""
 
-    if st.button("Aggiungi materiale"):
+    if st.button("Add material"):
         if not nuovo_nome.strip():
-            st.warning("Inserisci il nome del materiale.")
+            st.warning("Enter the material name.")
         elif nuovo_nome.strip() in st.session_state.materiali:
-            st.warning(f"Esiste già un materiale con il nome '{nuovo_nome.strip()}'.")
+            st.warning(f"A material named '{nuovo_nome.strip()}' already exists.")
         else:
             try:
                 tverg = float(nuovo_tverg_str) if nuovo_tverg_str.strip() else None
             except ValueError:
                 tverg = None
-                st.warning("T_verg non valido — impostato a n.d.")
+                st.warning("Invalid T_verg — set to n.d.")
             if nuovo_tipo == "biologico":
                 try:
                     resa = float(nuovo_resa_str) if nuovo_resa_str.strip() else None
                 except ValueError:
                     resa = None
-                    st.warning("Resa non valida — impostata a n.d.")
+                    st.warning("Invalid resa — set to n.d.")
                 try:
                     fequiv = float(nuovo_fequiv_str) if nuovo_fequiv_str.strip() else None
                 except ValueError:
                     fequiv = None
-                    st.warning("F_equiv non valido — impostato a n.d.")
+                    st.warning("Invalid F_equiv — set to n.d.")
             else:
                 resa = None
                 fequiv = None
@@ -401,31 +401,31 @@ def sezione_materiali():
                 "t_ric": nuovo_tric, "tipo": nuovo_tipo, "resa": resa, "f_equiv": fequiv,
             }
             save_json("materiali.json", st.session_state.materiali)
-            st.success(f"Materiale '{nuovo_nome.strip()}' aggiunto.")
+            st.success(f"Material '{nuovo_nome.strip()}' added.")
             st.rerun()
 
-    # ── Rimuovi ───────────────────────────────────────────────────────────────
+    # ── Remove ────────────────────────────────────────────────────────────────
     if st.session_state.materiali:
         nomi = list(st.session_state.materiali.keys())
         col_del1, col_del2 = st.columns([2, 1])
         with col_del1:
-            da_rimuovere = st.selectbox("Rimuovi materiale", nomi, key="mat_sel_rimuovi")
+            da_rimuovere = st.selectbox("Remove material", nomi, key="mat_sel_rimuovi")
         with col_del2:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("Rimuovi", key="mat_btn_rimuovi"):
+            if st.button("Remove", key="mat_btn_rimuovi"):
                 del st.session_state.materiali[da_rimuovere]
                 save_json("materiali.json", st.session_state.materiali)
                 st.rerun()
 
-    # ── Modifica ──────────────────────────────────────────────────────────────
+    # ── Edit ──────────────────────────────────────────────────────────────────
     if st.session_state.materiali:
-        st.markdown("**Modifica materiale esistente**")
+        st.markdown("**Edit existing material**")
         nomi_mod = list(st.session_state.materiali.keys())
 
         if "ultimo_mat_modifica" not in st.session_state:
             st.session_state.ultimo_mat_modifica = nomi_mod[0]
 
-        sel_mat = st.selectbox("Seleziona materiale da modificare", nomi_mod, key="mat_sel_modifica")
+        sel_mat = st.selectbox("Select material to edit", nomi_mod, key="mat_sel_modifica")
 
         if sel_mat != st.session_state.ultimo_mat_modifica:
             for k in ("mat_edit_nome", "mat_edit_tipo", "mat_edit_tverg", "mat_edit_tsmalt",
@@ -442,70 +442,70 @@ def sezione_materiali():
 
         ea1, ea2 = st.columns([2, 1])
         with ea1:
-            edit_nome = st.text_input("Nome materiale", value=sel_mat, key="mat_edit_nome")
+            edit_nome = st.text_input("Material name", value=sel_mat, key="mat_edit_nome")
         with ea2:
-            edit_tipo = st.selectbox("Tipo", tipo_opts, index=tipo_idx, key="mat_edit_tipo")
+            edit_tipo = st.selectbox("Type", tipo_opts, index=tipo_idx, key="mat_edit_tipo")
         ec1, ec2, ec3, ec4 = st.columns(4)
         with ec1:
             edit_tverg_str = st.text_input(
-                "Produzione vergine (kgCO₂/kg)", value=tverg_default, key="mat_edit_tverg",
-                help="CO₂ emessa per produrre 1kg di materia vergine",
+                "Virgin production (kgCO₂/kg)", value=tverg_default, key="mat_edit_tverg",
+                help="CO₂ emitted to produce 1kg of virgin material",
             )
         with ec2:
             edit_tsmalt = st.number_input(
-                "Smaltimento (kgCO₂/kg)", min_value=0.0, value=float(m["t_smalt"]), step=0.01,
-                key="mat_edit_tsmalt", help="CO₂ emessa per smaltire 1kg senza riciclo",
+                "Disposal (kgCO₂/kg)", min_value=0.0, value=float(m["t_smalt"]), step=0.01,
+                key="mat_edit_tsmalt", help="CO₂ emitted to dispose of 1kg without recycling",
             )
         with ec3:
             edit_ttratt = st.number_input(
-                "Trattamento (kgCO₂/kg)", min_value=0.0, value=float(m["t_tratt"]), step=0.01,
-                key="mat_edit_ttratt", help="CO₂ emessa per il trattamento pre-riciclo di 1kg",
+                "Treatment (kgCO₂/kg)", min_value=0.0, value=float(m["t_tratt"]), step=0.01,
+                key="mat_edit_ttratt", help="CO₂ emitted for pre-recycling treatment of 1kg",
             )
         with ec4:
             edit_tric = st.number_input(
-                "Riciclo (kgCO₂/kg)", min_value=0.0, value=float(m["t_ric"]), step=0.01,
-                key="mat_edit_tric", help="CO₂ emessa dal processo di riciclo di 1kg",
+                "Recycling (kgCO₂/kg)", min_value=0.0, value=float(m["t_ric"]), step=0.01,
+                key="mat_edit_tric", help="CO₂ emitted by the recycling process for 1kg",
             )
         if edit_tipo == "biologico":
             ed1, ed2 = st.columns(2)
             with ed1:
                 edit_resa_str = st.text_input(
-                    "Resa coltura (t/ha/anno)", value=resa_default, key="mat_edit_resa",
-                    help="Tonnellate di biomassa prodotte per ettaro all'anno — fonte GFN",
+                    "Crop yield (t/ha/year)", value=resa_default, key="mat_edit_resa",
+                    help="Tonnes of biomass produced per hectare per year — source GFN",
                 )
             with ed2:
                 edit_fequiv_str = st.text_input(
-                    "Equivalenza territoriale (gha/ha)", value=fequiv_default, key="mat_edit_fequiv",
-                    help="Conversione da ettari fisici a ettari globali — fonte GFN",
+                    "Land equivalence (gha/ha)", value=fequiv_default, key="mat_edit_fequiv",
+                    help="Conversion from physical hectares to global hectares — source GFN",
                 )
         else:
             edit_resa_str = ""
             edit_fequiv_str = ""
 
-        if st.button("Salva modifiche", key="mat_btn_salva"):
+        if st.button("Save changes", key="mat_btn_salva"):
             if not edit_nome.strip():
-                st.warning("Il nome del materiale non può essere vuoto.")
+                st.warning("Material name cannot be empty.")
             else:
                 altri_nomi = [n for n in st.session_state.materiali if n != sel_mat]
                 if edit_nome.strip() in altri_nomi:
-                    st.warning(f"Esiste già un materiale con il nome '{edit_nome.strip()}'.")
+                    st.warning(f"A material named '{edit_nome.strip()}' already exists.")
                 else:
                     try:
                         tverg = float(edit_tverg_str) if edit_tverg_str.strip() else None
                     except ValueError:
                         tverg = None
-                        st.warning("T_verg non valido — impostato a n.d.")
+                        st.warning("Invalid T_verg — set to n.d.")
                     if edit_tipo == "biologico":
                         try:
                             resa = float(edit_resa_str) if edit_resa_str.strip() else None
                         except ValueError:
                             resa = None
-                            st.warning("Resa non valida — impostata a n.d.")
+                            st.warning("Invalid resa — set to n.d.")
                         try:
                             fequiv = float(edit_fequiv_str) if edit_fequiv_str.strip() else None
                         except ValueError:
                             fequiv = None
-                            st.warning("F_equiv non valido — impostato a n.d.")
+                            st.warning("Invalid F_equiv — set to n.d.")
                     else:
                         resa = None
                         fequiv = None
@@ -523,115 +523,115 @@ def sezione_materiali():
                         st.session_state.materiali[sel_mat] = nuovo_mat
                     save_json("materiali.json", st.session_state.materiali)
                     st.session_state.ultimo_mat_modifica = edit_nome.strip()
-                    st.success(f"Materiale '{edit_nome.strip()}' aggiornato.")
+                    st.success(f"Material '{edit_nome.strip()}' updated.")
                     st.rerun()
 
 
 def pagina_calcolatore():
-    st.markdown("### Dati movimento")
+    st.markdown("### Movement data")
 
     if not st.session_state.get("veicoli"):
-        st.warning("Nessun veicolo disponibile. Aggiungine almeno uno nella sezione Veicoli.")
+        st.warning("No vehicles available. Add at least one in the Vehicles section.")
         return
 
     col_form, col_out = st.columns([1, 1], gap="large")
 
     with col_form:
         modelli = [v["modello"] for v in st.session_state.veicoli]
-        modello_sel = st.selectbox("Seleziona veicolo", modelli)
+        modello_sel = st.selectbox("Select vehicle", modelli)
         veicolo = next(v for v in st.session_state.veicoli if v["modello"] == modello_sel)
 
-        pieno_str = f"{veicolo['co2pkm_pieno']} kg/km" if veicolo["co2pkm_pieno"] else "— (fallback lineare)"
+        pieno_str = f"{veicolo['co2pkm_pieno']} kg/km" if veicolo["co2pkm_pieno"] else "— (linear fallback)"
         st.caption(
-            f"CO2/km vuoto: **{veicolo['co2pkm_vuoto']}** · "
-            f"CO2/km pieno: **{pieno_str}** · "
+            f"CO2/km empty: **{veicolo['co2pkm_vuoto']}** · "
+            f"CO2/km full: **{pieno_str}** · "
             f"C_max: **{veicolo['c_max']} kg** · "
-            f"Curva: **{'logaritmica' if veicolo['co2pkm_pieno'] else 'lineare (fallback)'}**"
+            f"Curve: **{'logarithmic' if veicolo['co2pkm_pieno'] else 'linear (fallback)'}**"
         )
 
         st.divider()
 
-        materiale = st.selectbox("Materiale", list(st.session_state["materiali"].keys()))
+        materiale = st.selectbox("Material", list(st.session_state["materiali"].keys()))
         f = st.session_state["materiali"][materiale]
 
         q_kg = st.number_input(
-            "Q — Kg conferiti dal cliente",
+            "Q — Kg delivered by client",
             min_value=0.1, value=100.0, step=10.0,
-            help="Peso del rifiuto consegnato in questo ritiro"
+            help="Weight of waste delivered in this pickup"
         )
 
-        st.markdown("**Logistica**")
+        st.markdown("**Logistics**")
         c1, c2 = st.columns(2)
         with c1:
-            d_ecof = st.number_input("D_cliente (km)", min_value=0.1, value=10.0, step=0.5,
-                                     help="Distanza Ecof -> unita locale del cliente")
-            d_imp  = st.number_input("D_impianto (km)", min_value=0.1, value=15.0, step=0.5,
-                                     help="Distanza unita locale -> impianto di riciclo")
+            d_operator = st.number_input("D_client (km)", min_value=0.1, value=10.0, step=0.5,
+                                         help="Distance operator → client local unit")
+            d_imp  = st.number_input("D_plant (km)", min_value=0.1, value=15.0, step=0.5,
+                                     help="Distance local unit → recycling plant")
         with c2:
-            n_giro = st.number_input("N_giro", min_value=1, value=3, step=1,
-                                     help="Clienti che condividono il tragitto Ecof->area")
+            n_giro = st.number_input("N_trip", min_value=1, value=3, step=1,
+                                     help="Clients sharing the operator→area leg")
             carico = st.number_input(
-                "C — Carico totale furgone (kg)",
+                "C — Total van load (kg)",
                 min_value=q_kg,
                 max_value=float(veicolo["c_max"]),
                 value=min(max(q_kg * 3, 300.0), float(veicolo["c_max"])),
                 step=50.0,
-                help=f"Peso totale nel furgone — max {veicolo['c_max']} kg per questo modello"
+                help=f"Total weight in the van — max {veicolo['c_max']} kg for this model"
             )
 
         st.divider()
 
-        st.markdown("**Fattori emissivi applicati** *(kgCO2/kg — fonte: Ecof Italia)*")
+        st.markdown("**Applied emission factors** *(kgCO2/kg — source: internal data)*")
         df_f = pd.DataFrame([{
             "T_verg":  f["t_verg"] if f["t_verg"] is not None else "n.d.",
             "T_smalt": f["t_smalt"], "T_tratt": f["t_tratt"],
-            "T_ric":   f["t_ric"],   "Tipo":    f["tipo"],
+            "T_ric":   f["t_ric"],   "Type":    f["tipo"],
         }])
         st.dataframe(df_f, hide_index=True, width='stretch')
 
-        calcola = st.button("Calcola", type="primary", width='stretch')
+        calcola = st.button("Calculate", type="primary", width='stretch')
 
     with col_out:
-        st.markdown("### Risultati")
+        st.markdown("### Results")
 
         if not calcola:
-            st.info("Compila il form e premi **Calcola** per vedere i risultati.")
+            st.info("Fill in the form and press **Calculate** to see results.")
             return
 
-        r = calcola_movimento(materiale, q_kg, d_ecof, d_imp, n_giro, carico, veicolo)
+        r = calcola_movimento(materiale, q_kg, d_operator, d_imp, n_giro, carico, veicolo)
 
         st.markdown(badge_saldo(r["gha_netti"]), unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
         if veicolo["co2pkm_pieno"] is None:
-            st.warning("CO2/km pieno non disponibile — usato modello lineare (fallback).")
+            st.warning("CO2/km full load not available — using linear model (fallback).")
         else:
-            st.success("Curva logaritmica applicata.")
+            st.success("Logarithmic curve applied.")
 
-        # Biocapacità da CO₂ evitata — mostrata solo quando co2_netta < 0
+        # Biocapacity from avoided CO₂ — shown only when co2_netta < 0
         bc_co2 = abs(r["gha_impronta"]) if r["co2_netta"] < 0 else None
 
         if bc_co2 is not None:
-            # Riciclo virtuoso: due righe da 2 metriche ciascuna
+            # Virtuous recycling: two rows of 2 metrics each
             m1, m2 = st.columns(2)
-            m1.metric("CO₂ netta",                  f"{r['co2_netta']:+.2f} kg")
-            m2.metric("Saldo netto",                 f"{r['gha_netti']:+.4f} gha")
+            m1.metric("Net CO₂",                      f"{r['co2_netta']:+.2f} kg")
+            m2.metric("Net balance",                   f"{r['gha_netti']:+.4f} gha")
             m3, m4 = st.columns(2)
-            m3.metric("Biocapacità da CO₂ evitata", f"+{bc_co2:.4f} gha")
-            m4.metric("Biocapacità da terreno",      f"+{r['bc_liberata']:.4f} gha" if r["bc_liberata"] > 0 else "—")
+            m3.metric("Biocapacity from avoided CO₂", f"+{bc_co2:.4f} gha")
+            m4.metric("Biocapacity from land",         f"+{r['bc_liberata']:.4f} gha" if r["bc_liberata"] > 0 else "—")
         else:
-            # Riciclo non virtuoso: CO₂ netta positiva → impronta, nessuna biocapacità da CO₂
+            # Non-virtuous recycling: positive net CO₂ → footprint, no biocapacity from CO₂
             m1, m2, m3 = st.columns(3)
-            m1.metric("CO₂ netta",             f"{r['co2_netta']:+.2f} kg")
-            m2.metric("Impronta ecologica",    f"{r['gha_impronta']:.4f} gha")
-            m3.metric("Biocapacità da terreno", f"+{r['bc_liberata']:.4f} gha" if r["bc_liberata"] > 0 else "—")
+            m1.metric("Net CO₂",               f"{r['co2_netta']:+.2f} kg")
+            m2.metric("Ecological footprint",  f"{r['gha_impronta']:.4f} gha")
+            m3.metric("Biocapacity from land",  f"+{r['bc_liberata']:.4f} gha" if r["bc_liberata"] > 0 else "—")
 
         st.divider()
 
-        st.markdown("**Scomposizione CO2 per componente**")
-        st.caption("P1 — Bilancio emissivo del riciclo rispetto a smaltimento e produzione vergine  |  P2 — Emissioni del tragitto Ecof → cliente, ripartite per numero di clienti nel giro  |  P3 — Emissioni del tragitto cliente → impianto, quota fissa ripartita per giro più quota variabile proporzionale al peso conferito")
+        st.markdown("**CO2 breakdown by component**")
+        st.caption("P1 — Emissions balance of recycling vs. disposal and virgin production  |  P2 — Emissions of the operator → client leg, split by number of clients on the route  |  P3 — Emissions of the client → plant leg, fixed share split by route plus variable share proportional to delivered weight")
 
-        # Ordine P1 → P2 → P3 dall'alto verso il basso (Plotly orizzontale è bottom-up, quindi invertiamo)
+        # Order P1 → P2 → P3 top to bottom (Plotly horizontal is bottom-up, so we reverse)
         componenti = ["P3", "P2", "P1"]
         valori     = [r["co2_p3"], r["co2_p2"], r["co2_p1"]]
         colori     = ["#52FFB8" if v <= 0 else "#FF4B4B" for v in valori]
@@ -643,15 +643,15 @@ def pagina_calcolatore():
             orientation="h",
             marker=dict(color=colori, line=dict(width=0), cornerradius=6),
             width=0.35,
-            text=None,  # gestiamo le etichette manualmente con annotazioni
+            text=None,  # handle labels manually with annotations
         ))
 
         fig.add_vline(x=0, line_color="#555555", line_dash="dash")
 
-        # Annotazioni a posizione fissa a destra del grafico — allineate e distanziate
+        # Fixed-position annotations to the right of the chart — aligned and spaced
         for i, (label, colore) in enumerate(zip(etichette, colori)):
             fig.add_annotation(
-                x=1.02,           # fuori dall'area plot, in coordinate paper (0-1)
+                x=1.02,           # outside plot area, in paper coordinates (0-1)
                 y=i,
                 xref="paper",
                 yref="y",
@@ -665,7 +665,7 @@ def pagina_calcolatore():
             plot_bgcolor="#0E1117",
             paper_bgcolor="#0E1117",
             height=240,
-            margin=dict(l=0, r=120, t=10, b=30),  # margine destro per le etichette
+            margin=dict(l=0, r=120, t=10, b=30),  # right margin for labels
             xaxis=dict(
                 title="kgCO2",
                 title_font=dict(color="#AAAAAA"),
@@ -708,7 +708,7 @@ def pagina_calcolatore():
                 y=[y_vuoto, y_pieno],
                 mode="markers+text",
                 marker=dict(color="white", size=8),
-                text=["Vuoto", "Pieno"],
+                text=["Empty", "Full"],
                 textposition=["top right", "top left"],
                 textfont=dict(color="white", size=11),
                 showlegend=False,
@@ -723,7 +723,7 @@ def pagina_calcolatore():
                     line=dict(color="#FF4B4B", width=2),
                     symbol="circle",
                 ),
-                text=["Questo giro"],
+                text=["This trip"],
                 textposition="top right",
                 textfont=dict(color="#FF4B4B", size=11),
                 showlegend=False,
@@ -746,7 +746,7 @@ def pagina_calcolatore():
                 height=250,
                 margin=dict(l=0, r=20, t=10, b=30),
                 xaxis=dict(
-                    title="Carico (kg)",
+                    title="Load (kg)",
                     title_font=dict(color="#AAAAAA"),
                     tickfont=dict(color="#AAAAAA"),
                     showgrid=False,
@@ -765,7 +765,7 @@ def pagina_calcolatore():
 
         st.divider()
 
-        with st.expander("Dettaglio calcolo passo per passo"):
+        with st.expander("Step-by-step calculation detail"):
             t_verg_val = f["t_verg"] if f["t_verg"] is not None else 0.0
 
             if veicolo["co2pkm_pieno"] is not None:
@@ -776,95 +776,95 @@ def pagina_calcolatore():
                     f"CO2perKm(C) = {veicolo['co2pkm_vuoto']} + {b:.6f} x ln(1 + C)"
                 )
             else:
-                curva_str = f"CO2perKm(C) = {veicolo['co2pkm_vuoto']} + C x 0.00008  *(lineare — fallback)*"
+                curva_str = f"CO2perKm(C) = {veicolo['co2pkm_vuoto']} + C x 0.00008  *(linear — fallback)*"
 
             st.markdown(f"""
-**Curva emissioni ({r['modello_curva']}):**
+**Emissions curve ({r['modello_curva']}):**
 {curva_str}
 
-| Variabile | Valore |
+| Variable | Value |
 |-----------|--------|
-| Q (kg conferiti) | {q_kg} kg |
+| Q (kg delivered) | {q_kg} kg |
 | Conf = Q / C | {r['conf']:.4f} |
-| CO2perKm(0) vuoto | {r['co2pkm_vuoto']:.5f} kg/km |
-| CO2perKm(C) carico | {r['co2pkm_carico']:.5f} kg/km |
+| CO2perKm(0) empty | {r['co2pkm_vuoto']:.5f} kg/km |
+| CO2perKm(C) loaded | {r['co2pkm_carico']:.5f} kg/km |
 """)
 
             if r["no_recycling"]:
                 st.markdown(f"""
-*(Materiale senza percorso di riciclo — il calcolo usa solo il costo di trattamento e smaltimento)*
+*(Material without recycling pathway — calculation uses only treatment and disposal cost)*
 
 **P1** = {q_kg} x ({f['t_tratt']} + {f['t_smalt']}) = **{r['co2_p1']:+.3f} kg CO2**
 
-**P2** = ({d_ecof} x {r['co2pkm_vuoto']:.5f}) / {n_giro} = **{r['co2_p2']:+.3f} kg CO2**
+**P2** = ({d_operator} x {r['co2pkm_vuoto']:.5f}) / {n_giro} = **{r['co2_p2']:+.3f} kg CO2**
 
 **P3** = ({d_imp} x {r['co2pkm_vuoto']:.5f}) / {n_giro} + ({r['co2pkm_carico']:.5f} - {r['co2pkm_vuoto']:.5f}) x {d_imp} x {r['conf']:.4f} = **{r['co2_p3']:+.3f} kg CO2**
 
-**CO2 netta** = P1 + P2 + P3 = **{r['co2_netta']:+.3f} kg CO2**
+**Net CO₂** = P1 + P2 + P3 = **{r['co2_netta']:+.3f} kg CO2**
 
-**Impronta ecologica** = ({r['co2_netta']:.3f} / 1000) / {CO2_PER_GHA} = **{r['gha_impronta']:.5f} gha**
+**Ecological footprint** = ({r['co2_netta']:.3f} / 1000) / {CO2_PER_GHA} = **{r['gha_impronta']:.5f} gha**
 
-**Saldo netto** = **{r['gha_netti']:+.5f} gha**
+**Net balance** = **{r['gha_netti']:+.5f} gha**
 """)
             else:
                 st.markdown(f"""
 **P1** = {q_kg} x ({f['t_tratt']} + {f['t_ric']} - {f['t_smalt']} - {t_verg_val}) = **{r['co2_p1']:+.3f} kg CO2**
 
-**P2** = ({d_ecof} x {r['co2pkm_vuoto']:.5f}) / {n_giro} = **{r['co2_p2']:+.3f} kg CO2**
+**P2** = ({d_operator} x {r['co2pkm_vuoto']:.5f}) / {n_giro} = **{r['co2_p2']:+.3f} kg CO2**
 
 **P3** = ({d_imp} x {r['co2pkm_vuoto']:.5f}) / {n_giro} + ({r['co2pkm_carico']:.5f} - {r['co2pkm_vuoto']:.5f}) x {d_imp} x {r['conf']:.4f} = **{r['co2_p3']:+.3f} kg CO2**
 
-**CO2 netta** = P1 + P2 + P3 = **{r['co2_netta']:+.3f} kg CO2**
+**Net CO₂** = P1 + P2 + P3 = **{r['co2_netta']:+.3f} kg CO2**
 
-**Impronta in gha** = ({r['co2_netta']:.3f} / 1000) / {CO2_PER_GHA} = **{r['gha_impronta']:.5f} gha**
+**Footprint in gha** = ({r['co2_netta']:.3f} / 1000) / {CO2_PER_GHA} = **{r['gha_impronta']:.5f} gha**
 """)
                 if f["tipo"] == "biologico" and f["resa"]:
-                    bc_co2_str = f"\n**Biocapacità da CO₂ evitata** = |{r['gha_impronta']:.5f}| = **{abs(r['gha_impronta']):.5f} gha**\n" if r["co2_netta"] < 0 else "\n*(CO₂ netta positiva — nessuna biocapacità da CO₂ evitata)*\n"
+                    bc_co2_str = f"\n**Biocapacity from avoided CO₂** = |{r['gha_impronta']:.5f}| = **{abs(r['gha_impronta']):.5f} gha**\n" if r["co2_netta"] < 0 else "\n*(Net CO₂ positive — no biocapacity from avoided CO₂)*\n"
                     st.markdown(f"""
-**Biocapacità da terreno** = ({q_kg} / 1000) / {f['resa']} x {f['f_equiv']} = **{r['bc_liberata']:.5f} gha**
+**Biocapacity from land** = ({q_kg} / 1000) / {f['resa']} x {f['f_equiv']} = **{r['bc_liberata']:.5f} gha**
 {bc_co2_str}
-**Saldo netto** = -{r['gha_impronta']:.5f} + {r['bc_liberata']:.5f} = **{r['gha_netti']:+.5f} gha**
+**Net balance** = -{r['gha_impronta']:.5f} + {r['bc_liberata']:.5f} = **{r['gha_netti']:+.5f} gha**
 """)
                 else:
-                    bc_co2_str = f"\n**Biocapacità da CO₂ evitata** = |{r['gha_impronta']:.5f}| = **{abs(r['gha_impronta']):.5f} gha**\n" if r["co2_netta"] < 0 else "\n*(CO₂ netta positiva — nessuna biocapacità da CO₂ evitata)*\n"
+                    bc_co2_str = f"\n**Biocapacity from avoided CO₂** = |{r['gha_impronta']:.5f}| = **{abs(r['gha_impronta']):.5f} gha**\n" if r["co2_netta"] < 0 else "\n*(Net CO₂ positive — no biocapacity from avoided CO₂)*\n"
                     st.markdown(f"""
-*(Materiale abiotico — nessuna biocapacità da terreno)*
+*(Abiotic material — no land biocapacity)*
 {bc_co2_str}
-**Saldo netto** = -{r['gha_impronta']:.5f} = **{r['gha_netti']:+.5f} gha**
+**Net balance** = -{r['gha_impronta']:.5f} = **{r['gha_netti']:+.5f} gha**
 """)
 
 
 def pagina_tabelle():
-    st.markdown("### Tabelle di riferimento")
-    tab1, tab2 = st.tabs(["Fattori emissivi", "Veicoli"])
+    st.markdown("### Reference tables")
+    tab1, tab2 = st.tabs(["Emission factors", "Vehicles"])
 
     with tab1:
-        st.caption("Fonte: Ecof Italia. Unita: kgCO2eq/kg.")
+        st.caption("Source: internal data. Unit: kgCO2eq/kg.")
         rows = []
         for mat, f in FATTORI.items():
             rows.append({
-                "Materiale":   mat,
-                "Tipo":        f["tipo"],
+                "Material":    mat,
+                "Type":        f["tipo"],
                 "T_verg":      f["t_verg"] if f["t_verg"] is not None else "n.d.",
                 "T_smalt":     f["t_smalt"],
                 "T_tratt":     f["t_tratt"],
                 "T_ric":       f["t_ric"],
-                "Resa (t/ha)": f["resa"] if f["resa"] else "—",
+                "Yield (t/ha)": f["resa"] if f["resa"] else "—",
                 "F_equiv":     f["f_equiv"] if f["f_equiv"] else "—",
             })
         st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
 
     with tab2:
-        st.caption("Veicoli inseriti nella sessione corrente.")
+        st.caption("Vehicles in the current session.")
         if st.session_state.get("veicoli"):
             df_v = pd.DataFrame(st.session_state.veicoli)
             df_v["co2pkm_pieno"] = df_v["co2pkm_pieno"].apply(
-                lambda x: x if x is not None else "— (da rilevare)"
+                lambda x: x if x is not None else "— (to be measured)"
             )
-            df_v.columns = ["Modello", "CO2/km vuoto", "CO2/km pieno", "C_max (kg)"]
+            df_v.columns = ["Model", "CO2/km empty", "CO2/km full", "C_max (kg)"]
             st.dataframe(df_v, hide_index=True, width='stretch')
         else:
-            st.info("Nessun veicolo inserito.")
+            st.info("No vehicles entered.")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -873,7 +873,7 @@ def pagina_tabelle():
 
 def main():
     st.set_page_config(
-        page_title="Ecof Italia — Calcolatore",
+        page_title="Soluslab — Calculator",
         page_icon="🌿",
         layout="wide",
     )
@@ -886,23 +886,23 @@ def main():
             "materiali.json", {k: dict(v) for k, v in FATTORI.items()}
         )
 
-    st.markdown("# Calcolatore Saldo Ambientale")
-    st.caption("Ecof Italia — strumento interno di calcolo CO2 e biocapacita per movimento rifiuti.")
+    st.markdown("# Environmental Balance Calculator")
+    st.caption("Soluslab — internal CO2 and biocapacity calculation tool for waste movements.")
     st.divider()
 
     sezione = st.radio(
-        "Sezione", ["Calcolatore", "Veicoli", "Materiali", "Tabelle"],
+        "Section", ["Calculator", "Vehicles", "Materials", "Tables"],
         horizontal=True, label_visibility="collapsed",
     )
     st.markdown("---")
 
-    if sezione == "Calcolatore":
+    if sezione == "Calculator":
         pagina_calcolatore()
-    elif sezione == "Veicoli":
+    elif sezione == "Vehicles":
         sezione_veicoli()
-    elif sezione == "Materiali":
+    elif sezione == "Materials":
         sezione_materiali()
-    elif sezione == "Tabelle":
+    elif sezione == "Tables":
         pagina_tabelle()
 
 
