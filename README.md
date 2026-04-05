@@ -53,7 +53,7 @@ streamlit run app.py
 
 ## Licenza
 
-Public.
+Publica.
 
 ## License
 
