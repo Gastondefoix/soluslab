@@ -1,54 +1,60 @@
 # Soluslab
 
-**Environmental Balance Calculator** — a Streamlit web app that computes the
-net CO₂ footprint and biocapacity impact of waste collection and transport
-operations.
+**Calcolatore Saldo Ambientale** — applicazione Streamlit che calcola
+l'impatto netto in CO₂ e biocapacità delle operazioni di raccolta
+e trasporto rifiuti.
 
-## What it does
+## Cosa fa
 
-For each waste movement, Soluslab calculates a three-part carbon balance:
+Per ogni movimento di rifiuti, Soluslab calcola un bilancio carbonico
+in tre componenti:
 
-- **P1** — Emission savings from recycling vs. linear alternatives (landfill /
-  virgin production)
-- **P2** — Emissions from the return (empty) trip from operator to client
-- **P3** — Emissions from the client-to-plant leg, with fixed and variable
-  components
+- **P1** — Risparmio emissivo del riciclo rispetto all'alternativa lineare
+  (discarica / produzione vergine)
+- **P2** — Emissioni del viaggio di ritorno a vuoto dall'operatore al cliente
+- **P3** — Emissioni del tragitto cliente → impianto, con componenti
+  fisse e variabili
 
-Vehicle emissions follow a **logarithmic curve** calibrated on empty/full load
-values, with a linear EEA fallback for uncalibrated vehicles.
+Le emissioni dei veicoli seguono una **curva logaritmica** calibrata su
+valori a vuoto/pieno carico, con fallback lineare EEA per veicoli
+non calibrati.
 
-Biocapacity is derived from GFN forest absorption factors and equivalence
-factors for biological materials.
+La biocapacità è calcolata tramite i fattori di assorbimento forestale
+GFN e i fattori di equivalenza per materiali biologici.
 
-## Features
+## Funzionalità
 
-- Per-movement CO₂ and global hectares (gha) calculation
-- Vehicle and material management with JSON persistence
-- Dark-theme Plotly charts
-- Special handling for mixed/undifferentiated waste streams
-- Deployable on Streamlit Community Cloud
+- Calcolo CO₂ e ettari globali (gha) per singolo movimento
+- Gestione veicoli e materiali con persistenza JSON
+- Grafici Plotly tema scuro
+- Gestione speciale per rifiuti indifferenziati
+- Deployabile su Streamlit Community Cloud
 
 ## Stack
 
 - Python 3
 - Streamlit
 - Plotly
-- JSON (vehicles and materials configuration)
+- JSON (configurazione veicoli e materiali)
 
-## Run locally
+## Avvio locale
 
-```bash
+\`\`\`bash
 pip install -r requirements.txt
 streamlit run app.py
-```
+\`\`\`
 
-## Data files
+## File di configurazione
 
-| File | Description |
+| File | Descrizione |
 |---|---|
-| `veicoli.json` | Vehicle fleet with emission curve parameters |
-| `materiali.json` | Waste materials with emission factors and recycling rates |
+| `veicoli.json` | Parco veicoli con parametri curva emissioni |
+| `materiali.json` | Materiali rifiuto con fattori emissivi e tassi di riciclo |
+
+## Licenza
+
+Public.
 
 ## License
 
-Private — internal use only.
+Public.
