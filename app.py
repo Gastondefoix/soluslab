@@ -604,15 +604,15 @@ def pagina_calcolatore():
         if bc_co2 is not None:
             # Riciclo virtuoso: due righe da 2 metriche ciascuna
             m1, m2 = st.columns(2)
-            m1.metric("CO₂ netta",                  f"{r['co2_netta']:+.2f} kg")
-            m2.metric("Saldo netto",                 f"{r['gha_netti']:+.4f} gha")
+            m1.metric("CO₂ netta",                  f"{r['co2_netta']:+.3f} kg")
+            m2.metric("Saldo netto",                 f"{r['gha_netti']:+.3f} gha")
             m3, m4 = st.columns(2)
             m3.metric("Biocapacità da CO₂ evitata", f"+{bc_co2:.3f} gha")
             m4.metric("Biocapacità da terreno",      f"+{r['bc_liberata']:.3f} gha" if r["bc_liberata"] > 0 else "—")
         else:
             # Riciclo non virtuoso: CO₂ netta positiva → impronta, nessuna biocapacità da CO₂
             m1, m2, m3 = st.columns(3)
-            m1.metric("CO₂ netta",             f"{r['co2_netta']:+.2f} kg")
+            m1.metric("CO₂ netta",             f"{r['co2_netta']:+.3f} kg")
             m2.metric("Impronta ecologica",    f"{r['gha_impronta']:.3f} gha")
             m3.metric("Biocapacità da terreno", f"+{r['bc_liberata']:.3f} gha" if r["bc_liberata"] > 0 else "—")
 
