@@ -1,7 +1,7 @@
 {
   "Plastica (mix)": {
     "t_verg": 2.5,
-    "t_smalt": 1.0,
+    "t_smalt": 0.8,
     "t_tratt": 0.1,
     "t_ric": 0.6,
     "tipo": "abiotico",
@@ -9,37 +9,37 @@
     "f_equiv": null
   },
   "Carta/cartone": {
-    "t_verg": 1.15,
-    "t_smalt": 0.85,
+    "t_verg": 1.1,
+    "t_smalt": 0.8,
     "t_tratt": 0.1,
-    "t_ric": 0.45,
+    "t_ric": 0.6,
     "tipo": "biotico",
     "resa": 2.68,
     "f_equiv": 1.26
   },
   "Vetro": {
-    "t_verg": 0.9,
-    "t_smalt": 0.15,
+    "t_verg": 0.8,
+    "t_smalt": 0.1,
     "t_tratt": 0.05,
-    "t_ric": 0.3,
+    "t_ric": 0.4,
     "tipo": "abiotico",
     "resa": null,
     "f_equiv": null
   },
-  "Metalli": {
+  "Metalli (mix)": {
     "t_verg": 3.5,
     "t_smalt": 0.2,
     "t_tratt": 0.1,
-    "t_ric": 0.6,
+    "t_ric": 0.7,
     "tipo": "abiotico",
     "resa": null,
     "f_equiv": null
   },
   "Legno": {
-    "t_verg": 0.35,
-    "t_smalt": 1.15,
+    "t_verg": 0.3,
+    "t_smalt": 1.1,
     "t_tratt": 0.1,
-    "t_ric": 0.2,
+    "t_ric": 0.3,
     "tipo": "biotico",
     "resa": 2.68,
     "f_equiv": 1.26
@@ -55,9 +55,9 @@
   },
   "Organico": {
     "t_verg": null,
-    "t_smalt": 1.5,
+    "t_smalt": 1.0,
     "t_tratt": 0.1,
-    "t_ric": 0.2,
+    "t_ric": 0.3,
     "tipo": "biotico",
     "resa": 3.3,
     "f_equiv": 2.51
