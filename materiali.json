@@ -13,7 +13,7 @@
     "t_smalt": 0.85,
     "t_tratt": 0.1,
     "t_ric": 0.45,
-    "tipo": "biologico",
+    "tipo": "biotico",
     "resa": 2.68,
     "f_equiv": 1.26
   },
@@ -40,7 +40,7 @@
     "t_smalt": 1.15,
     "t_tratt": 0.1,
     "t_ric": 0.2,
-    "tipo": "biologico",
+    "tipo": "biotico",
     "resa": 2.68,
     "f_equiv": 1.26
   },
@@ -58,7 +58,7 @@
     "t_smalt": 1.5,
     "t_tratt": 0.1,
     "t_ric": 0.2,
-    "tipo": "biologico",
+    "tipo": "biotico",
     "resa": 3.3,
     "f_equiv": 2.51
   },

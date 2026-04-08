@@ -42,7 +42,7 @@ FATTORI = {
     },
     "Carta/cartone": {
         "t_verg": 1.15, "t_smalt": 0.85, "t_tratt": 0.10, "t_ric": 0.45,
-        "tipo": "biologico", "resa": 2.68, "f_equiv": 1.26,
+        "tipo": "biotico", "resa": 2.68, "f_equiv": 1.26,
     },
     "Vetro": {
         "t_verg": 0.90, "t_smalt": 0.15, "t_tratt": 0.05, "t_ric": 0.30,
@@ -54,7 +54,7 @@ FATTORI = {
     },
     "Legno": {
         "t_verg": 0.35, "t_smalt": 1.15, "t_tratt": 0.10, "t_ric": 0.20,
-        "tipo": "biologico", "resa": 2.68, "f_equiv": 1.26,
+        "tipo": "biotico", "resa": 2.68, "f_equiv": 1.26,
     },
     "Toner": {
         "t_verg": 4.00, "t_smalt": 1.20, "t_tratt": 0.10, "t_ric": 1.50,
@@ -63,7 +63,7 @@ FATTORI = {
     "Organico": {
         # t_verg = n.d.: aerobic digestion at Recall Latina, output undefined
         "t_verg": None, "t_smalt": 1.50, "t_tratt": 0.10, "t_ric": 0.20,
-        "tipo": "biologico", "resa": 3.30, "f_equiv": 2.51,
+        "tipo": "biotico", "resa": 3.30, "f_equiv": 2.51,
     },
     "Indifferenziato": {
         "t_verg": None, "t_smalt": 1.10, "t_tratt": 0.10, "t_ric": 0.0,
@@ -112,13 +112,17 @@ def co2_per_km(carico, veicolo):
     return co2_per_km_lin(carico, veicolo["co2pkm_vuoto"])
 
 
-def calcola_movimento(materiale, q_kg, d_operator_km, d_impianto_km, n_giro, carico_totale_kg, veicolo):
+def calcola_movimento(materiale, q_kg, d_itinerario_km, d_baricentro_impianto_km, n_itinerario, carico_totale_kg, veicolo):
     """
     Calculates net CO2 and balance in gha for a single movement.
 
-    P1 = Q * (T_tratt + T_ric - T_smalt - T_verg)
-    P2 = (D_cliente * CO2perKm(0)) / N_giro
-    P3 = (CO2perKm(0) / N_giro) * D_impianto + (CO2perKm(C) - CO2perKm(0)) * D_impianto * Conf
+    no_recycling:
+      S  = Q * (T_tratt + T_smalt)
+    normal:
+      S1 = -Q * (T_smalt + T_verg)
+      S2 =  Q * (T_tratt + T_ric)
+    T1 = (D_itinerario * CO2perKm(0)) / N_itinerario
+    T2 = (CO2perKm(C) - CO2perKm(0)) * D_baricentro_impianto * Conf
 
     gha_netti = -gha_impronta + bc_liberata
     Convention: positive = biocapacity, negative = ecological footprint
@@ -131,21 +135,28 @@ def calcola_movimento(materiale, q_kg, d_operator_km, d_impianto_km, n_giro, car
 
     no_recycling = f["t_ric"] == 0 and f["t_verg"] is None
     if no_recycling:
-        p1 = q_kg * (f["t_tratt"] + f["t_smalt"])
+        s  = q_kg * (f["t_tratt"] + f["t_smalt"])
+        s1 = None
+        s2 = None
     else:
-        p1 = q_kg * (f["t_tratt"] + f["t_ric"] - f["t_smalt"] - t_verg)
-    p2 = (d_operator_km * co2pkm_vuoto) / n_giro
-    p3 = (d_impianto_km * co2pkm_vuoto) / n_giro + (co2pkm_car - co2pkm_vuoto) * d_impianto_km * conf
+        s  = None
+        s1 = -q_kg * (f["t_smalt"] + t_verg)
+        s2 =  q_kg * (f["t_tratt"] + f["t_ric"])
+    t1 = (d_itinerario_km * co2pkm_vuoto) / n_itinerario
+    t2 = (co2pkm_car - co2pkm_vuoto) * d_baricentro_impianto_km * conf
 
-    co2_netta = p1 + p2 + p3
-    gha_imp   = (co2_netta / 1000) / CO2_PER_GHA
+    if no_recycling:
+        co2_netta = s + t1 + t2
+    else:
+        co2_netta = s1 + s2 + t1 + t2
+    gha_imp = (co2_netta / 1000) / CO2_PER_GHA
 
     bc_lib = 0.0
-    if f["tipo"] == "biologico" and f["resa"] and f["f_equiv"]:
+    if f["tipo"] == "biotico" and f["resa"] and f["f_equiv"]:
         bc_lib = (q_kg / 1000) / f["resa"] * f["f_equiv"]
 
     return {
-        "co2_p1": p1, "co2_p2": p2, "co2_p3": p3,
+        "s": s, "s1": s1, "s2": s2, "t1": t1, "t2": t2,
         "co2_netta": co2_netta,
         "gha_impronta": gha_imp,
         "bc_liberata": bc_lib,
@@ -169,7 +180,7 @@ def badge_saldo(gha):
             f'padding:1rem 1.5rem;text-align:center;display:inline-block">'
             f'<div style="color:#52FFB8;font-size:.7rem;font-weight:700;letter-spacing:.1em">'
             f'BIOCAPACITA LIBERATA</div>'
-            f'<div style="color:#52FFB8;font-size:2rem;font-weight:800">+{gha:.4f} gha</div></div>'
+            f'<div style="color:#52FFB8;font-size:2rem;font-weight:800">+{gha:.3f} gha</div></div>'
         )
     else:
         return (
@@ -177,7 +188,7 @@ def badge_saldo(gha):
             f'padding:1rem 1.5rem;text-align:center;display:inline-block">'
             f'<div style="color:#FF4B4B;font-size:.7rem;font-weight:700;letter-spacing:.1em">'
             f'IMPRONTA ECOLOGICA</div>'
-            f'<div style="color:#FF4B4B;font-size:2rem;font-weight:800">{gha:.4f} gha</div></div>'
+            f'<div style="color:#FF4B4B;font-size:2rem;font-weight:800">{gha:.3f} gha</div></div>'
         )
 
 
@@ -185,8 +196,8 @@ def sezione_veicoli():
     st.markdown("### Gestione Veicoli")
     st.caption(
         "Inserisci i modelli di furgone usati dall'operatore. "
-        "CO2/km pieno puo essere lasciato vuoto finche non e disponibile il dato reale: "
-        "verra usato il modello lineare come fallback."
+        "CO2/km pieno può essere lasciato vuoto finché non è disponibile il dato reale: "
+        "verrà usato il modello lineare come fallback."
     )
 
     if "veicoli" not in st.session_state:
@@ -207,21 +218,17 @@ def sezione_veicoli():
     with c1:
         nuovo_modello = st.text_input("Nome modello", key="input_modello", placeholder="es. Fiat Ducato 35 L3H2")
     with c2:
-        nuovo_vuoto = st.number_input("CO2/km vuoto", min_value=0.05, value=0.18, step=0.01, key="input_vuoto")
+        nuovo_vuoto = st.number_input("CO2/km vuoto", min_value=0.01, value=0.18, step=0.01, format="%.2f", help="Emissioni CO₂ al km a furgone vuoto (kg/km)", key="input_vuoto")
     with c3:
-        nuovo_pieno_str = st.text_input("CO2/km pieno (opz.)", key="input_pieno", placeholder="es. 0.24")
+        nuovo_pieno = st.number_input("CO2/km pieno (opz.)", min_value=0.01, value=0.24, step=0.01, format="%.2f", help="Emissioni CO₂ al km a pieno carico — usato per calibrare la curva logaritmica (kg/km)", key="input_pieno")
     with c4:
-        nuovo_cmax = st.number_input("C_max (kg)", min_value=100, value=1200, step=100, key="input_cmax")
+        nuovo_cmax = st.number_input("C_max (kg)", min_value=100, value=1200, step=100, help="Portata massima del veicolo in kg — corrisponde a f(C_max) nella curva logaritmica", key="input_cmax")
 
     if st.button("Aggiungi veicolo"):
         if not nuovo_modello.strip():
             st.warning("Inserisci il nome del modello.")
         else:
-            try:
-                pieno = float(nuovo_pieno_str) if nuovo_pieno_str.strip() else None
-            except ValueError:
-                pieno = None
-                st.warning("CO2/km pieno non valido — verra usato il fallback lineare.")
+            pieno = nuovo_pieno
 
             st.session_state.veicoli.append({
                 "modello": nuovo_modello.strip(),
@@ -264,17 +271,17 @@ def sezione_veicoli():
             st.session_state.ultimo_veicolo_modifica = sel_mod
 
         v_mod = next(v for v in st.session_state.veicoli if v["modello"] == sel_mod)
-        pieno_default = str(v_mod["co2pkm_pieno"]) if v_mod["co2pkm_pieno"] is not None else ""
+        pieno_default = v_mod["co2pkm_pieno"] if v_mod["co2pkm_pieno"] is not None else 0.24
 
         ec1, ec2, ec3, ec4 = st.columns([2, 1, 1, 1])
         with ec1:
             edit_modello = st.text_input("Nome modello", value=v_mod["modello"], key="edit_modello")
         with ec2:
-            edit_vuoto = st.number_input("CO2/km vuoto", min_value=0.05, value=v_mod["co2pkm_vuoto"], step=0.01, key="edit_vuoto")
+            edit_vuoto = st.number_input("CO2/km vuoto", min_value=0.01, value=v_mod["co2pkm_vuoto"], step=0.01, format="%.2f", help="Emissioni CO₂ al km a furgone vuoto (kg/km)", key="edit_vuoto")
         with ec3:
-            edit_pieno_str = st.text_input("CO2/km pieno (opz.)", value=pieno_default, key="edit_pieno")
+            edit_pieno = st.number_input("CO2/km pieno (opz.)", min_value=0.01, value=pieno_default, step=0.01, format="%.2f", help="Emissioni CO₂ al km a pieno carico — usato per calibrare la curva logaritmica (kg/km)", key="edit_pieno")
         with ec4:
-            edit_cmax = st.number_input("C_max (kg)", min_value=100, value=v_mod["c_max"], step=100, key="edit_cmax")
+            edit_cmax = st.number_input("C_max (kg)", min_value=100, value=v_mod["c_max"], step=100, help="Portata massima del veicolo in kg — corrisponde a f(C_max) nella curva logaritmica", key="edit_cmax")
 
         if st.button("Salva modifiche"):
             if not edit_modello.strip():
@@ -284,11 +291,7 @@ def sezione_veicoli():
                 if edit_modello.strip() in altri_modelli:
                     st.warning(f"Esiste già un veicolo con il nome '{edit_modello.strip()}'.")
                 else:
-                    try:
-                        pieno = float(edit_pieno_str) if edit_pieno_str.strip() else None
-                    except ValueError:
-                        pieno = None
-                        st.warning("CO2/km pieno non valido — verra usato il fallback lineare.")
+                    pieno = edit_pieno
                     idx = next(i for i, v in enumerate(st.session_state.veicoli) if v["modello"] == sel_mod)
                     st.session_state.veicoli[idx] = {
                         "modello": edit_modello.strip(),
@@ -306,7 +309,7 @@ def sezione_materiali():
     st.markdown("### Gestione Materiali")
     st.caption(
         "Modifica i fattori emissivi usati nel calcolo. "
-        "T_verg, resa e f_equiv possono essere lasciati vuoti (n.d.)."
+        "Per i materiali biotici assicurati di inserire anche resa e fattore di equivalenza territoriale "
     )
 
     # ── Tabella ───────────────────────────────────────────────────────────────
@@ -333,11 +336,11 @@ def sezione_materiali():
     with a1:
         nuovo_nome = st.text_input("Nome materiale", key="mat_input_nome", placeholder="es. Gomma")
     with a2:
-        nuovo_tipo = st.selectbox("Tipo", ["abiotico", "biologico"], key="mat_input_tipo")
+        nuovo_tipo = st.selectbox("Tipo", ["abiotico", "biotico"], key="mat_input_tipo")
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        nuovo_tverg_str = st.text_input(
-            "Produzione vergine (kgCO₂/kg)", key="mat_input_tverg", placeholder="es. 2.50",
+        nuovo_tverg_str = st.number_input(
+            "Produzione vergine (kgCO₂/kg)",  min_value=0.0, value=1.0, step=0.01, key="mat_input_tverg",
             help="CO₂ emessa per produrre 1kg di materia vergine",
         )
     with c2:
@@ -355,21 +358,21 @@ def sezione_materiali():
             "Riciclo (kgCO₂/kg)", min_value=0.0, value=0.60, step=0.01, key="mat_input_tric",
             help="CO₂ emessa dal processo di riciclo di 1kg",
         )
-    if nuovo_tipo == "biologico":
+    if nuovo_tipo == "biotico":
         d1, d2 = st.columns(2)
         with d1:
-            nuovo_resa_str = st.text_input(
-                "Resa coltura (t/ha/anno)", key="mat_input_resa", placeholder="es. 2.68",
+            nuovo_resa = st.number_input(
+                "Resa coltura (t/ha/anno)", min_value=0.0, value=2.68, step=0.01, key="mat_input_resa",
                 help="Tonnellate di biomassa prodotte per ettaro all'anno — fonte GFN",
             )
         with d2:
-            nuovo_fequiv_str = st.text_input(
-                "Equivalenza territoriale (gha/ha)", key="mat_input_fequiv", placeholder="es. 1.26",
+            nuovo_fequiv = st.number_input(
+                "Equivalenza territoriale (gha/ha)", min_value=0.0, value=1.26, step=0.01, key="mat_input_fequiv",
                 help="Conversione da ettari fisici a ettari globali — fonte GFN",
             )
     else:
-        nuovo_resa_str = ""
-        nuovo_fequiv_str = ""
+        nuovo_resa = 0.0
+        nuovo_fequiv = 0.0
 
     if st.button("Aggiungi materiale"):
         if not nuovo_nome.strip():
@@ -377,22 +380,10 @@ def sezione_materiali():
         elif nuovo_nome.strip() in st.session_state.materiali:
             st.warning(f"Esiste già un materiale con il nome '{nuovo_nome.strip()}'.")
         else:
-            try:
-                tverg = float(nuovo_tverg_str) if nuovo_tverg_str.strip() else None
-            except ValueError:
-                tverg = None
-                st.warning("T_verg non valido — impostato a n.d.")
-            if nuovo_tipo == "biologico":
-                try:
-                    resa = float(nuovo_resa_str) if nuovo_resa_str.strip() else None
-                except ValueError:
-                    resa = None
-                    st.warning("Resa non valida — impostata a n.d.")
-                try:
-                    fequiv = float(nuovo_fequiv_str) if nuovo_fequiv_str.strip() else None
-                except ValueError:
-                    fequiv = None
-                    st.warning("F_equiv non valido — impostato a n.d.")
+            tverg = nuovo_tverg_str if nuovo_tverg_str > 0 else None
+            if nuovo_tipo == "biotico":
+                resa = nuovo_resa if nuovo_resa > 0 else None
+                fequiv = nuovo_fequiv if nuovo_fequiv > 0 else None
             else:
                 resa = None
                 fequiv = None
@@ -434,11 +425,11 @@ def sezione_materiali():
             st.session_state.ultimo_mat_modifica = sel_mat
 
         m = st.session_state.materiali[sel_mat]
-        tipo_opts = ["abiotico", "biologico"]
+        tipo_opts = ["abiotico", "biotico"]
         tipo_idx  = tipo_opts.index(m["tipo"]) if m["tipo"] in tipo_opts else 0
-        tverg_default  = str(m["t_verg"])  if m["t_verg"]  is not None else ""
-        resa_default   = str(m["resa"])    if m["resa"]    is not None else ""
-        fequiv_default = str(m["f_equiv"]) if m["f_equiv"] is not None else ""
+        tverg_default  = m["t_verg"]  if m["t_verg"]  is not None else 0.0
+        resa_default   = m["resa"]    if m["resa"]    is not None else 0.0
+        fequiv_default = m["f_equiv"] if m["f_equiv"] is not None else 0.0
 
         ea1, ea2 = st.columns([2, 1])
         with ea1:
@@ -447,40 +438,40 @@ def sezione_materiali():
             edit_tipo = st.selectbox("Tipo", tipo_opts, index=tipo_idx, key="mat_edit_tipo")
         ec1, ec2, ec3, ec4 = st.columns(4)
         with ec1:
-            edit_tverg_str = st.text_input(
-                "Produzione vergine (kgCO₂/kg)", value=tverg_default, key="mat_edit_tverg",
-                help="CO₂ emessa per produrre 1kg di materia vergine",
+            edit_tverg_str = st.number_input(
+                "Produzione vergine (kgCO₂/kg)", min_value=0.0, value=tverg_default, step=0.01,
+                key="mat_edit_tverg", help="CO₂ emessa per produrre 1kg di materia vergine",
             )
         with ec2:
             edit_tsmalt = st.number_input(
-                "Smaltimento (kgCO₂/kg)", min_value=0.0, value=float(m["t_smalt"]), step=0.01,
+                "Smaltimento (kgCO₂/kg)", min_value=0.0, value=m["t_smalt"], step=0.01,
                 key="mat_edit_tsmalt", help="CO₂ emessa per smaltire 1kg senza riciclo",
             )
         with ec3:
             edit_ttratt = st.number_input(
-                "Trattamento (kgCO₂/kg)", min_value=0.0, value=float(m["t_tratt"]), step=0.01,
+                "Trattamento (kgCO₂/kg)", min_value=0.0, value=m["t_tratt"], step=0.01,
                 key="mat_edit_ttratt", help="CO₂ emessa per il trattamento pre-riciclo di 1kg",
             )
         with ec4:
             edit_tric = st.number_input(
-                "Riciclo (kgCO₂/kg)", min_value=0.0, value=float(m["t_ric"]), step=0.01,
+                "Riciclo (kgCO₂/kg)", min_value=0.0, value=m["t_ric"], step=0.01,
                 key="mat_edit_tric", help="CO₂ emessa dal processo di riciclo di 1kg",
             )
-        if edit_tipo == "biologico":
+        if edit_tipo == "biotico":
             ed1, ed2 = st.columns(2)
             with ed1:
-                edit_resa_str = st.text_input(
-                    "Resa coltura (t/ha/anno)", value=resa_default, key="mat_edit_resa",
+                edit_resa = st.number_input(
+                    "Resa coltura (t/ha/anno)", min_value=0.0, value=resa_default, step=0.01, key="mat_edit_resa",
                     help="Tonnellate di biomassa prodotte per ettaro all'anno — fonte GFN",
                 )
             with ed2:
-                edit_fequiv_str = st.text_input(
-                    "Equivalenza territoriale (gha/ha)", value=fequiv_default, key="mat_edit_fequiv",
+                edit_fequiv = st.number_input(
+                    "Equivalenza territoriale (gha/ha)", min_value=0.0, value=fequiv_default, step=0.01, key="mat_edit_fequiv",
                     help="Conversione da ettari fisici a ettari globali — fonte GFN",
                 )
         else:
-            edit_resa_str = ""
-            edit_fequiv_str = ""
+            edit_resa = 0.0
+            edit_fequiv = 0.0
 
         if st.button("Salva modifiche", key="mat_btn_salva"):
             if not edit_nome.strip():
@@ -490,22 +481,10 @@ def sezione_materiali():
                 if edit_nome.strip() in altri_nomi:
                     st.warning(f"Esiste già un materiale con il nome '{edit_nome.strip()}'.")
                 else:
-                    try:
-                        tverg = float(edit_tverg_str) if edit_tverg_str.strip() else None
-                    except ValueError:
-                        tverg = None
-                        st.warning("T_verg non valido — impostato a n.d.")
-                    if edit_tipo == "biologico":
-                        try:
-                            resa = float(edit_resa_str) if edit_resa_str.strip() else None
-                        except ValueError:
-                            resa = None
-                            st.warning("Resa non valida — impostata a n.d.")
-                        try:
-                            fequiv = float(edit_fequiv_str) if edit_fequiv_str.strip() else None
-                        except ValueError:
-                            fequiv = None
-                            st.warning("F_equiv non valido — impostato a n.d.")
+                    tverg = edit_tverg_str if edit_tverg_str > 0 else None
+                    if edit_tipo == "biotico":
+                        resa = edit_resa if edit_resa > 0 else None
+                        fequiv = edit_fequiv if edit_fequiv > 0 else None
                     else:
                         resa = None
                         fequiv = None
@@ -562,21 +541,32 @@ def pagina_calcolatore():
 
         st.markdown("**Logistica**")
         c1, c2 = st.columns(2)
+        
         with c1:
-            d_operator = st.number_input("D_cliente (km)", min_value=0.1, value=30.0, step=0.5,
-                                         help="Distanza operatore -> unita locale del cliente")
-            d_imp  = st.number_input("D_impianto (km)", min_value=0.1, value=50.0, step=0.5,
-                                     help="Distanza unita locale -> impianto di riciclo")
-        with c2:
-            n_giro = st.number_input("N_giro", min_value=1, value=3, step=1,
-                                     help="Clienti che condividono il tragitto operatore->area")
+            n_itinerario = st.number_input("N_itinerario", min_value=1, value=3, step=1,
+                                           help="Numero di clienti nel giro")
             carico = st.number_input(
                 "C — Carico totale furgone (kg)",
                 min_value=q_kg,
                 max_value=float(veicolo["c_max"]),
                 value=min(max(q_kg * 3, 300.0), float(veicolo["c_max"])),
-                step=50.0,
+                step=1.0,
                 help=f"Peso totale nel furgone — max {veicolo['c_max']} kg per questo modello"
+            )
+        with c2:
+            d_baricentro_impianto = st.number_input(
+                "D_baricentro_impianto (km)",
+                min_value=1.0,
+                value=50.0,
+                step=1.0,
+                help="Distanza dal baricentro dei clienti all'impianto di riciclo",
+            )
+            d_itinerario = st.number_input(
+                "D_itinerario (km)",
+                min_value=d_baricentro_impianto,
+                value=max(100.0, d_baricentro_impianto),
+                step=1.0,
+                help="Distanza totale del giro circolare: Ecof → clienti → impianto → Ecof",
             )
 
         st.divider()
@@ -598,7 +588,7 @@ def pagina_calcolatore():
             st.info("Compila il form e premi **Calcola** per vedere i risultati.")
             return
 
-        r = calcola_movimento(materiale, q_kg, d_operator, d_imp, n_giro, carico, veicolo)
+        r = calcola_movimento(materiale, q_kg, d_itinerario, d_baricentro_impianto, n_itinerario, carico, veicolo)
 
         st.markdown(badge_saldo(r["gha_netti"]), unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
@@ -617,25 +607,30 @@ def pagina_calcolatore():
             m1.metric("CO₂ netta",                  f"{r['co2_netta']:+.2f} kg")
             m2.metric("Saldo netto",                 f"{r['gha_netti']:+.4f} gha")
             m3, m4 = st.columns(2)
-            m3.metric("Biocapacità da CO₂ evitata", f"+{bc_co2:.4f} gha")
-            m4.metric("Biocapacità da terreno",      f"+{r['bc_liberata']:.4f} gha" if r["bc_liberata"] > 0 else "—")
+            m3.metric("Biocapacità da CO₂ evitata", f"+{bc_co2:.3f} gha")
+            m4.metric("Biocapacità da terreno",      f"+{r['bc_liberata']:.3f} gha" if r["bc_liberata"] > 0 else "—")
         else:
             # Riciclo non virtuoso: CO₂ netta positiva → impronta, nessuna biocapacità da CO₂
             m1, m2, m3 = st.columns(3)
             m1.metric("CO₂ netta",             f"{r['co2_netta']:+.2f} kg")
-            m2.metric("Impronta ecologica",    f"{r['gha_impronta']:.4f} gha")
-            m3.metric("Biocapacità da terreno", f"+{r['bc_liberata']:.4f} gha" if r["bc_liberata"] > 0 else "—")
+            m2.metric("Impronta ecologica",    f"{r['gha_impronta']:.3f} gha")
+            m3.metric("Biocapacità da terreno", f"+{r['bc_liberata']:.3f} gha" if r["bc_liberata"] > 0 else "—")
 
         st.divider()
 
         st.markdown("**Scomposizione CO2 per componente**")
-        st.caption("P1 — Bilancio emissivo del riciclo rispetto a smaltimento e produzione vergine  |  P2 — Emissioni del tragitto operatore → cliente, ripartite per numero di clienti nel giro  |  P3 — Emissioni del tragitto cliente → impianto, quota fissa ripartita per giro più quota variabile proporzionale al peso conferito")
+        st.caption("S1 — Emissioni evitate grazie al riciclo  |  S2 — Emissioni generate dal processo di riciclo  |  T1 — Emissioni del tragitto itinerario, ripartite per numero di clienti  |  T2 — Incremento delle emissioni dovuto al carico, proporzionale al peso conferito")
 
-        # Ordine P1 → P2 → P3 dall'alto verso il basso (Plotly orizzontale è bottom-up, quindi invertiamo)
-        componenti = ["P3", "P2", "P1"]
-        valori     = [r["co2_p3"], r["co2_p2"], r["co2_p1"]]
-        colori     = ["#52FFB8" if v <= 0 else "#FF4B4B" for v in valori]
-        etichette  = [f"P3: {r['co2_p3']:+.3f} kg", f"P2: {r['co2_p2']:+.3f} kg", f"P1: {r['co2_p1']:+.3f} kg"]
+        if r["no_recycling"]:
+            componenti = ["T2", "T1", "S"]
+            valori     = [r["t2"], r["t1"], r["s"]]
+            colori     = ["#FF4B4B", "#FF4B4B", "#FF4B4B"]
+            etichette  = [f"T2: {r['t2']:+.3f} kg", f"T1: {r['t1']:+.3f} kg", f"S: {r['s']:+.3f} kg"]
+        else:
+            componenti = ["T2", "T1", "S2", "S1"]
+            valori     = [r["t2"], r["t1"], r["s2"], r["s1"]]
+            colori     = ["#FF4B4B", "#FF4B4B", "#FF4B4B", "#52FFB8"]
+            etichette  = [f"T2: {r['t2']:+.3f} kg", f"T1: {r['t1']:+.3f} kg", f"S2: {r['s2']:+.3f} kg", f"S1: {r['s1']:+.3f} kg"]
 
         fig = go.Figure(go.Bar(
             x=valori,
@@ -664,8 +659,8 @@ def pagina_calcolatore():
         fig.update_layout(
             plot_bgcolor="#0E1117",
             paper_bgcolor="#0E1117",
-            height=240,
-            margin=dict(l=0, r=120, t=10, b=30),  # margine destro per le etichette
+            height=300,
+            margin=dict(l=0, r=130, t=30, b=30),  # margine destro per le etichette
             xaxis=dict(
                 title="kgCO2",
                 title_font=dict(color="#AAAAAA"),
@@ -699,7 +694,7 @@ def pagina_calcolatore():
             fig_curve.add_trace(go.Scatter(
                 x=xs, y=ys,
                 mode="lines",
-                line=dict(color="#52FFB8", width=2),
+                line=dict(color="#4A90D9", width=2),
                 showlegend=False,
             ))
 
@@ -719,32 +714,33 @@ def pagina_calcolatore():
                 y=[y_giro],
                 mode="markers+text",
                 marker=dict(
-                    color="#FF4B4B", size=12,
+                    color="#FF4B4B", size=7,
                     line=dict(color="#FF4B4B", width=2),
                     symbol="circle",
                 ),
-                text=["Questo giro"],
-                textposition="top right",
+                text=["Carico indicato"],
+                textposition="bottom right",
                 textfont=dict(color="#FF4B4B", size=11),
                 showlegend=False,
             ))
 
             fig_curve.add_shape(
                 type="line",
-                x0=x_giro, x1=x_giro, y0=min(ys), y1=y_giro,
-                line=dict(color="#FF4B4B", width=1, dash="dash"),
+                x0=x_giro, x1=x_giro, y0=0, y1=y_giro,
+                line=dict(color="#FF4B4B", width=1, dash="dot"),
             )
             fig_curve.add_shape(
                 type="line",
                 x0=0, x1=x_giro, y0=y_giro, y1=y_giro,
-                line=dict(color="#FF4B4B", width=1, dash="dash"),
+                line=dict(color="#FF4B4B", width=1, dash="dot"),
             )
 
             fig_curve.update_layout(
                 plot_bgcolor="#0E1117",
                 paper_bgcolor="#0E1117",
-                height=250,
-                margin=dict(l=0, r=20, t=10, b=30),
+                hoverlabel=dict(bgcolor="#0E1117", font_color="#FFFFFF"),
+                height=300,
+                margin=dict(l=0, r=30, t=30, b=30),
                 xaxis=dict(
                     title="Carico (kg)",
                     title_font=dict(color="#AAAAAA"),
@@ -758,6 +754,7 @@ def pagina_calcolatore():
                     tickfont=dict(color="#AAAAAA"),
                     showgrid=False,
                     zeroline=False,
+                    rangemode="tozero",
                 ),
                 showlegend=False,
             )
@@ -772,8 +769,8 @@ def pagina_calcolatore():
                 b = (veicolo["co2pkm_pieno"] - veicolo["co2pkm_vuoto"]) / math.log(1 + veicolo["c_max"])
                 curva_str = (
                     f"b = ({veicolo['co2pkm_pieno']} - {veicolo['co2pkm_vuoto']}) "
-                    f"/ ln(1 + {veicolo['c_max']}) = **{b:.6f}**\n\n"
-                    f"CO2perKm(C) = {veicolo['co2pkm_vuoto']} + {b:.6f} x ln(1 + C)"
+                    f"/ ln(1 + {veicolo['c_max']}) = **{b:.3f}**\n\n"
+                    f"CO2perKm(C) = {veicolo['co2pkm_vuoto']} + {b:.3f} x ln(1 + C)"
                 )
             else:
                 curva_str = f"CO2perKm(C) = {veicolo['co2pkm_vuoto']} + C x 0.00008  *(lineare — fallback)*"
@@ -785,52 +782,57 @@ def pagina_calcolatore():
 | Variabile | Valore |
 |-----------|--------|
 | Q (kg conferiti) | {q_kg} kg |
-| Conf = Q / C | {r['conf']:.4f} |
-| CO2perKm(0) vuoto | {r['co2pkm_vuoto']:.5f} kg/km |
-| CO2perKm(C) carico | {r['co2pkm_carico']:.5f} kg/km |
+| Conf = Q / C | {r['conf']:.3f} |
+| D_itinerario | {d_itinerario} km |
+| D_baricentro_impianto | {d_baricentro_impianto} km |
+| N_itinerario | {n_itinerario} |
+| CO2perKm(0) vuoto | {r['co2pkm_vuoto']:.3f} kg/km |
+| CO2perKm(C) carico | {r['co2pkm_carico']:.3f} kg/km |
 """)
 
             if r["no_recycling"]:
                 st.markdown(f"""
 *(Materiale senza percorso di riciclo — il calcolo usa solo il costo di trattamento e smaltimento)*
 
-**P1** = {q_kg} x ({f['t_tratt']} + {f['t_smalt']}) = **{r['co2_p1']:+.3f} kg CO2**
+**S** = {q_kg} x ({f['t_tratt']} + {f['t_smalt']}) = **{r['s']:+.3f} kg CO2**
 
-**P2** = ({d_operator} x {r['co2pkm_vuoto']:.5f}) / {n_giro} = **{r['co2_p2']:+.3f} kg CO2**
+**T1** = ({d_itinerario} x {r['co2pkm_vuoto']:.3f}) / {n_itinerario} = **{r['t1']:+.3f} kg CO2**
 
-**P3** = ({d_imp} x {r['co2pkm_vuoto']:.5f}) / {n_giro} + ({r['co2pkm_carico']:.5f} - {r['co2pkm_vuoto']:.5f}) x {d_imp} x {r['conf']:.4f} = **{r['co2_p3']:+.3f} kg CO2**
+**T2** = ({r['co2pkm_carico']:.3f} - {r['co2pkm_vuoto']:.3f}) x {d_baricentro_impianto} x {r['conf']:.3f} = **{r['t2']:+.3f} kg CO2**
 
-**CO2 netta** = P1 + P2 + P3 = **{r['co2_netta']:+.3f} kg CO2**
+**CO2 netta** = S + T1 + T2 = **{r['co2_netta']:+.3f} kg CO2**
 
-**Impronta ecologica** = ({r['co2_netta']:.3f} / 1000) / {CO2_PER_GHA} = **{r['gha_impronta']:.5f} gha**
+**Impronta ecologica** = ({r['co2_netta']:.3f} / 1000) / {CO2_PER_GHA} = **{r['gha_impronta']:.3f} gha**
 
 **Saldo netto** = **{r['gha_netti']:+.5f} gha**
 """)
             else:
                 st.markdown(f"""
-**P1** = {q_kg} x ({f['t_tratt']} + {f['t_ric']} - {f['t_smalt']} - {t_verg_val}) = **{r['co2_p1']:+.3f} kg CO2**
+**S1** = -{q_kg} x ({f['t_smalt']} + {t_verg_val}) = **{r['s1']:+.3f} kg CO2**
 
-**P2** = ({d_operator} x {r['co2pkm_vuoto']:.5f}) / {n_giro} = **{r['co2_p2']:+.3f} kg CO2**
+**S2** = {q_kg} x ({f['t_tratt']} + {f['t_ric']}) = **{r['s2']:+.3f} kg CO2**
 
-**P3** = ({d_imp} x {r['co2pkm_vuoto']:.5f}) / {n_giro} + ({r['co2pkm_carico']:.5f} - {r['co2pkm_vuoto']:.5f}) x {d_imp} x {r['conf']:.4f} = **{r['co2_p3']:+.3f} kg CO2**
+**T1** = ({d_itinerario} x {r['co2pkm_vuoto']:.3f}) / {n_itinerario} = **{r['t1']:+.3f} kg CO2**
 
-**CO2 netta** = P1 + P2 + P3 = **{r['co2_netta']:+.3f} kg CO2**
+**T2** = ({r['co2pkm_carico']:.3f} - {r['co2pkm_vuoto']:.3f}) x {d_baricentro_impianto} x {r['conf']:.3f} = **{r['t2']:+.3f} kg CO2**
 
-**Impronta in gha** = ({r['co2_netta']:.3f} / 1000) / {CO2_PER_GHA} = **{r['gha_impronta']:.5f} gha**
+**CO2 netta** = S1 + S2 + T1 + T2 = **{r['co2_netta']:+.3f} kg CO2**
+
+**Impronta in gha** = ({r['co2_netta']:.3f} / 1000) / {CO2_PER_GHA} = **{r['gha_impronta']:.3f} gha**
 """)
-                if f["tipo"] == "biologico" and f["resa"]:
-                    bc_co2_str = f"\n**Biocapacità da CO₂ evitata** = |{r['gha_impronta']:.5f}| = **{abs(r['gha_impronta']):.5f} gha**\n" if r["co2_netta"] < 0 else "\n*(CO₂ netta positiva — nessuna biocapacità da CO₂ evitata)*\n"
+                if f["tipo"] == "biotico" and f["resa"]:
+                    bc_co2_str = f"\n**Biocapacità da CO₂ evitata** = |{r['gha_impronta']:.3f}| = **{abs(r['gha_impronta']):.3f} gha**\n" if r["co2_netta"] < 0 else "\n*(CO₂ netta positiva — nessuna biocapacità da CO₂ evitata)*\n"
                     st.markdown(f"""
-**Biocapacità da terreno** = ({q_kg} / 1000) / {f['resa']} x {f['f_equiv']} = **{r['bc_liberata']:.5f} gha**
+**Biocapacità da terreno** = ({q_kg} / 1000) / {f['resa']} x {f['f_equiv']} = **{r['bc_liberata']:.3f} gha**
 {bc_co2_str}
-**Saldo netto** = -{r['gha_impronta']:.5f} + {r['bc_liberata']:.5f} = **{r['gha_netti']:+.5f} gha**
+**Saldo netto** = -{r['gha_impronta']:.3f} + {r['bc_liberata']:.3f} = **{r['gha_netti']:+.5f} gha**
 """)
                 else:
-                    bc_co2_str = f"\n**Biocapacità da CO₂ evitata** = |{r['gha_impronta']:.5f}| = **{abs(r['gha_impronta']):.5f} gha**\n" if r["co2_netta"] < 0 else "\n*(CO₂ netta positiva — nessuna biocapacità da CO₂ evitata)*\n"
+                    bc_co2_str = f"\n**Biocapacità da CO₂ evitata** = |{r['gha_impronta']:.3f}| = **{abs(r['gha_impronta']):.3f} gha**\n" if r["co2_netta"] < 0 else "\n*(CO₂ netta positiva — nessuna biocapacità da CO₂ evitata)*\n"
                     st.markdown(f"""
 *(Materiale abiotico — nessuna biocapacità da terreno)*
 {bc_co2_str}
-**Saldo netto** = -{r['gha_impronta']:.5f} = **{r['gha_netti']:+.5f} gha**
+**Saldo netto** = -{r['gha_impronta']:.3f} = **{r['gha_netti']:+.5f} gha**
 """)
 
 
@@ -873,8 +875,8 @@ def pagina_tabelle():
 
 def main():
     st.set_page_config(
-        page_title="Soluslab — Calcolatore",
-        page_icon="🌿",
+        page_title="Soluslab",
+        page_icon="🌐",
         layout="wide",
     )
 
@@ -887,7 +889,7 @@ def main():
         )
 
     st.markdown("# Calcolatore Saldo Ambientale")
-    st.caption("Soluslab — strumento interno di calcolo CO2 e biocapacita per movimento rifiuti.")
+    st.caption("Soluslab — strumento di calcolo CO2 e biocapacita per movimento rifiuti.")
     st.divider()
 
     sezione = st.radio(
